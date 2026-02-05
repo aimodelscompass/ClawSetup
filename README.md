@@ -4,8 +4,6 @@
 
 Forget the terminal. ClawSetup is a friendly wizard that installs, configures, and launches your AI agent in 2 minutes.
 
-![ClawSetup Screenshot](https://via.placeholder.com/800x600?text=ClawSetup+Wizard)
-
 ## 🚀 How to Use
 
 ### macOS
@@ -29,18 +27,24 @@ Forget the terminal. ClawSetup is a friendly wizard that installs, configures, a
 - **Config Gen:** Automatically creates the correct `config.json` for Anthropic/OpenAI.
 - **One-Click Launch:** Starts the agent and opens the web dashboard.
 
-## 🛠️ For Developers (Building from Source)
+## 🛠️ Developer Setup (Building from Source)
 
-If you want to contribute or build it yourself:
+**Prerequisites:**
+- Node.js (v18+)
+- Rust (Cargo)
 
 ```bash
-# Install dependencies
+# 1. Clone the repo
+git clone https://github.com/aimodelscompass/ClawSetup.git
+cd ClawSetup
+
+# 2. Install dependencies
 npm install
 
-# Run in dev mode
+# 3. Run in Development Mode (Launches the GUI)
 npm run tauri dev
 
-# Build production binary
+# 4. Build Production Binary
 npm run tauri build
 ```
 
