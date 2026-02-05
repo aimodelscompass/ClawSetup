@@ -19,6 +19,7 @@ function App() {
   const [model, setModel] = useState("anthropic/claude-haiku-4-5-20251001");
   const [telegramToken, setTelegramToken] = useState("");
   const [progress, setProgress] = useState("");
+  const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
 
   useEffect(() => { checkSystem(); }, []);
 
@@ -61,6 +62,10 @@ function App() {
       setLogs("Generating Pairing Code...");
       const code: string = await invoke("generate_pairing_code");
       setPairingCode(code);
+
+      // Get authenticated URL
+      const url: string = await invoke("get_dashboard_url");
+      setDashboardUrl(url);
 
       setProgress("");
       setStep(6); // Go to pairing
@@ -147,7 +152,7 @@ function App() {
       {step === 6 && (
         <div className="step">
           <h2>🎉 It's Alive!</h2>
-          <p>Your agent is running on <strong>http://127.0.0.1:18789</strong></p>
+          <p>Your agent is running on <strong>{dashboardUrl}</strong></p>
 
           {pairingCode && (
             <div className="pairing-box">
@@ -157,7 +162,7 @@ function App() {
             </div>
           )}
 
-          <button onClick={() => open("http://127.0.0.1:18789")}>Open Dashboard</button>
+          <button onClick={() => open(dashboardUrl)}>Open Dashboard</button>
           <p style={{ marginTop: "20px", fontSize: "0.9em", color: "#666" }}>
             To chat via terminal: <code>openclaw tui</code>
           </p>

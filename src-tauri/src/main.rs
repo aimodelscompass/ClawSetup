@@ -319,6 +319,23 @@ fn generate_pairing_code() -> Result<String, String> {
     Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically once it receives your message.".to_string())
 }
 
+#[command]
+fn get_dashboard_url() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_path = home.join(".openclaw").join("openclaw.json");
+
+    let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+
+    let token = json.get("gateway")
+        .and_then(|g| g.get("auth"))
+        .and_then(|a| a.get("token"))
+        .and_then(|t| t.as_str())
+        .ok_or("Could not find gateway token in config")?;
+
+    Ok(format!("http://127.0.0.1:18789/?token={}", token))
+}
+
 // Helper to run shell commands with proper PATH (fixes macOS Tauri PATH issue)
 fn shell_command(cmd: &str) -> Result<String, String> {
     let output = Command::new("/bin/zsh")
@@ -342,7 +359,8 @@ fn main() {
             install_openclaw, 
             configure_agent,
             start_gateway,
-            generate_pairing_code
+            generate_pairing_code,
+            get_dashboard_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
