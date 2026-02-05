@@ -20,6 +20,10 @@ function App() {
   const [telegramToken, setTelegramToken] = useState("");
   const [progress, setProgress] = useState("");
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
+  
+  // Pairing Data
+  const [pairingInput, setPairingInput] = useState("");
+  const [pairingStatus, setPairingStatus] = useState("");
 
   useEffect(() => { checkSystem(); }, []);
 
@@ -59,9 +63,9 @@ function App() {
       await invoke("start_gateway");
 
       setProgress("Finalizing setup...");
-      setLogs("Generating Pairing Code...");
-      const code: string = await invoke("generate_pairing_code");
-      setPairingCode(code);
+      // Just getting instruction text now
+      const instruction: string = await invoke("generate_pairing_code");
+      setPairingCode(instruction); // "Ready! Send any message..."
 
       // Get authenticated URL
       const url: string = await invoke("get_dashboard_url");
@@ -74,6 +78,18 @@ function App() {
       setLogs("Error: " + e);
     }
     setLoading(false);
+  }
+
+  async function handlePairing() {
+    if (!pairingInput) return;
+    setPairingStatus("Verifying...");
+    try {
+      await invoke("approve_pairing", { code: pairingInput });
+      setPairingStatus("✅ Success! Bot paired.");
+      setPairingInput("");
+    } catch (e) {
+      setPairingStatus("❌ Error: " + e);
+    }
   }
 
   return (
@@ -154,15 +170,27 @@ function App() {
           <h2>🎉 It's Alive!</h2>
           <p>Your agent is running on <strong>{dashboardUrl}</strong></p>
 
-          {pairingCode && (
-            <div className="pairing-box">
-              <h3>Pairing Code</h3>
-              <div className="code">{pairingCode}</div>
-              <p>Send this code to your Telegram bot to finish.</p>
-            </div>
-          )}
+          <div className="pairing-box">
+             <h3>Telegram Pairing</h3>
+             <p style={{fontSize: "0.9em"}}>{pairingCode || "Message your bot to get a code."}</p>
+             
+             {telegramToken && (
+               <div style={{display: "flex", gap: "10px", marginTop: "10px", flexDirection: "column"}}>
+                 <input 
+                   placeholder="Enter code (e.g. 3RQ8EBFE)" 
+                   value={pairingInput} 
+                   onChange={(e) => setPairingInput(e.target.value)} 
+                   style={{textAlign: "center", letterSpacing: "2px"}}
+                 />
+                 <button onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
+                   {pairingStatus === "Verifying..." ? "Verifying..." : "Verify & Pair"}
+                 </button>
+                 {pairingStatus && <div style={{fontWeight: "bold", color: pairingStatus.includes("Error") ? "red" : "green"}}>{pairingStatus}</div>}
+               </div>
+             )}
+          </div>
 
-          <button onClick={() => open(dashboardUrl)}>Open Dashboard</button>
+          <button onClick={() => open(dashboardUrl)} style={{marginTop: "20px"}}>Open Dashboard</button>
           <p style={{ marginTop: "20px", fontSize: "0.9em", color: "#666" }}>
             To chat via terminal: <code>openclaw tui</code>
           </p>

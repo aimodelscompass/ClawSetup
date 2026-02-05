@@ -316,7 +316,20 @@ fn generate_pairing_code() -> Result<String, String> {
     // OpenClaw doesn't have a "pairing create" command.
     // The flow is: user sends a message to the bot, then checks pending requests.
     // Return instructions for the user.
-    Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically once it receives your message.".to_string())
+    Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically with a code.".to_string())
+}
+
+#[command]
+fn approve_pairing(code: String) -> Result<String, String> {
+    // Run: openclaw pairing approve <code> --channel telegram
+    let output = shell_command(&format!("openclaw pairing approve {} --channel telegram", code))?;
+    
+    // Check for success or error in output
+    if output.to_lowercase().contains("error") {
+        return Err(output);
+    }
+
+    Ok("Pairing successful!".to_string())
 }
 
 #[command]
@@ -360,7 +373,8 @@ fn main() {
             configure_agent,
             start_gateway,
             generate_pairing_code,
-            get_dashboard_url
+            get_dashboard_url,
+            approve_pairing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
