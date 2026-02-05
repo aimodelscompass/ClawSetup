@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
+use rand::Rng;
 
 #[derive(serde::Deserialize)]
 struct AgentConfig {
@@ -63,14 +64,26 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
 
+    // Generate a random gateway token
+    let gateway_token: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+
     // Handle Telegram Config section
     let telegram_section = if let Some(token) = config.telegram_token {
         if !token.is_empty() {
             format!(r#",
   "channels": {{
     "telegram": {{
-      "enabled": true,
-      "botToken": "{}"
+      "accounts": {{
+        "main": {{
+          "botToken": "{}",
+          "name": "Primary Bot",
+          "dmPolicy": "pairing"
+        }}
+      }}
     }}
   }}"#, token)
         } else {
@@ -85,8 +98,9 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
   "agents": {{
     "defaults": {{
       "model": {{
-        "primary": "{}" 
-      }}
+        "primary": "{}"
+      }},
+      "workspace": "{}/.openclaw/workspace"
     }}
   }},
   "auth": {{
@@ -96,8 +110,17 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         "key": "{}"
       }}
     }}
+  }},
+  "gateway": {{
+    "mode": "local",
+    "port": 18789,
+    "bind": "loopback",
+    "auth": {{
+      "mode": "token",
+      "token": "{}"
+    }}
   }}{}
-}}"#, config.model, config.provider, config.api_key, telegram_section);
+}}"#, config.model, home.display(), config.provider, config.api_key, gateway_token, telegram_section);
 
     fs::write(openclaw_root.join("config.json"), config_json).map_err(|e| e.to_string())?;
 
@@ -130,14 +153,30 @@ fn start_gateway() -> Result<String, String> {
     // Stop any existing instance first
     let _ = Command::new("openclaw").args(&["gateway", "stop"]).output();
 
-    // Start in background (daemon mode)
-    // We use std::process::Command to spawn it.
-    let child = Command::new("openclaw")
-        .args(&["gateway", "start", "--background"])
-        .spawn()
+    // Install the gateway service
+    let install_output = Command::new("openclaw")
+        .args(&["gateway", "install", "--force"])
+        .output()
+        .map_err(|e| format!("Failed to install gateway: {}", e))?;
+
+    if !install_output.status.success() {
+        return Err(format!("Gateway install failed: {}", String::from_utf8_lossy(&install_output.stderr)));
+    }
+
+    // Wait a moment for install to complete
+    thread::sleep(Duration::from_secs(1));
+
+    // Start the gateway service
+    let start_output = Command::new("openclaw")
+        .args(&["gateway", "start"])
+        .output()
         .map_err(|e| format!("Failed to start gateway: {}", e))?;
 
-    Ok("Gateway started.".into())
+    if !start_output.status.success() {
+        return Err(format!("Gateway start failed: {}", String::from_utf8_lossy(&start_output.stderr)));
+    }
+
+    Ok("Gateway installed and started.".into())
 }
 
 #[command]
@@ -160,14 +199,56 @@ fn generate_pairing_code() -> Result<String, String> {
     }
 }
 
+#[command]
+fn get_dashboard_url() -> Result<String, String> {
+    // Read the config to get the gateway token
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_path = home.join(".openclaw/config.json");
+
+    // If config exists, try to read the token
+    if config_path.exists() {
+        let config_content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+
+        // Parse JSON to extract token (simple string search for now)
+        // In production, would use serde_json to properly parse
+        if let Some(start) = config_content.find(r#""token":"#) {
+            let token_start = start + 9; // Length of "token":"
+            if let Some(end) = config_content[token_start..].find('"') {
+                let token = &config_content[token_start..token_start + end];
+                return Ok(format!("http://127.0.0.1:18789/?token={}", token));
+            }
+        }
+    }
+
+    // Fallback without token
+    Ok("http://127.0.0.1:18789/".into())
+}
+
+#[command]
+fn approve_pairing(code: String) -> Result<String, String> {
+    let output = Command::new("openclaw")
+        .args(&["pairing", "approve", "telegram", &code])
+        .output()
+        .map_err(|e| format!("Failed to approve pairing: {}", e))?;
+
+    if output.status.success() {
+        Ok("Pairing approved successfully.".into())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            check_prerequisites, 
-            install_openclaw, 
+            check_prerequisites,
+            install_openclaw,
             configure_agent,
             start_gateway,
-            generate_pairing_code
+            generate_pairing_code,
+            get_dashboard_url,
+            approve_pairing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
