@@ -1,9 +1,9 @@
 use tauri::command;
 use std::process::Command;
 use std::fs;
-use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
+use std::net::TcpStream;
 
 #[derive(serde::Deserialize)]
 struct AgentConfig {
@@ -25,34 +25,32 @@ struct PrereqCheck {
 
 #[command]
 fn check_prerequisites() -> PrereqCheck {
-    // Check paths to ensure we find them on Mac/Linux
-    let node = Command::new("node").arg("-v").output().is_ok();
-    let docker = Command::new("docker").arg("info").output().is_ok();
-    // Check if openclaw is in path
-    let openclaw = Command::new("openclaw").arg("--version").output().is_ok();
+    // Use shell_command to properly source user's PATH
+    let node = shell_command("node -v").is_ok();
+    // Docker not needed on macOS - OpenClaw runs natively
+    let openclaw = shell_command("openclaw --version").is_ok();
 
     PrereqCheck {
         node_installed: node,
-        docker_running: docker,
+        docker_running: true, // Always true on macOS (not needed)
         openclaw_installed: openclaw,
     }
 }
 
 #[command]
 fn install_openclaw() -> Result<String, String> {
-    // 1. Install via npm
-    // On Mac/Linux, this might fail without sudo. 
-    // We try to install to a user-local prefix if global fails, but for now we assume permission or user-configured npm.
-    let output = Command::new("npm")
-        .args(&["install", "-g", "openclaw"])
-        .output()
-        .map_err(|e| format!("Failed to execute npm: {}", e))?;
+    // Install via npm using shell_command for proper PATH
+    shell_command("npm install -g openclaw")?;
 
-    if output.status.success() {
-        Ok("OpenClaw installed successfully.".into())
-    } else {
-        Err(format!("Install failed: {}", String::from_utf8_lossy(&output.stderr)))
-    }
+    // Verify installation
+    shell_command("openclaw --version")?;
+
+    Ok("OpenClaw installed successfully.".to_string())
+}
+
+fn generate_token() -> Result<String, String> {
+    shell_command("node -e 'console.log(crypto.randomUUID())'")
+        .map(|s| s.trim().to_string())
 }
 
 #[command]
@@ -60,13 +58,28 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let openclaw_root = home.join(".openclaw");
     let workspace = openclaw_root.join("workspace");
+    let agents_dir = openclaw_root.join("agents").join("main").join("agent");
 
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&agents_dir).map_err(|e| e.to_string())?;
 
-    // Handle Telegram Config section
+    // Generate a secure token for the gateway
+    let gateway_token = generate_token()?;
+
+    // Build profile name (e.g., "anthropic:default")
+    let profile_name = format!("{}:default", config.provider);
+
+    // Handle Telegram config section
     let telegram_section = if let Some(token) = config.telegram_token {
         if !token.is_empty() {
             format!(r#",
+  "plugins": {{
+    "entries": {{
+      "telegram": {{
+        "enabled": true
+      }}
+    }}
+  }},
   "channels": {{
     "telegram": {{
       "enabled": true,
@@ -80,26 +93,78 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         String::new()
     };
 
-    // Write config.json
+    // Write openclaw.json (NOT config.json!)
     let config_json = format!(r#"{{
+  "messages": {{
+    "ackReactionScope": "group-mentions"
+  }},
   "agents": {{
     "defaults": {{
+      "maxConcurrent": 4,
+      "subagents": {{
+        "maxConcurrent": 8
+      }},
+      "compaction": {{
+        "mode": "safeguard"
+      }},
+      "workspace": "{}",
       "model": {{
-        "primary": "{}" 
+        "primary": "{}"
+      }},
+      "models": {{
+        "{}": {{}}
       }}
+    }}
+  }},
+  "gateway": {{
+    "mode": "local",
+    "port": 18789,
+    "bind": "loopback",
+    "auth": {{
+      "token": "{}"
+    }},
+    "tailscale": {{
+      "mode": "off",
+      "resetOnExit": false
     }}
   }},
   "auth": {{
     "profiles": {{
       "{}": {{
-        "mode": "api_key",
-        "key": "{}"
+        "provider": "{}",
+        "mode": "token"
       }}
     }}
   }}{}
-}}"#, config.model, config.provider, config.api_key, telegram_section);
+}}"#,
+        workspace.to_string_lossy(),
+        config.model,
+        config.model,
+        gateway_token,
+        profile_name,
+        config.provider,
+        telegram_section
+    );
 
-    fs::write(openclaw_root.join("config.json"), config_json).map_err(|e| e.to_string())?;
+    fs::write(openclaw_root.join("openclaw.json"), config_json).map_err(|e| e.to_string())?;
+
+    // Write auth-profiles.json with the actual API key
+    let auth_profiles_json = format!(r#"{{
+  "version": 1,
+  "profiles": {{
+    "{}": {{
+      "type": "token",
+      "provider": "{}",
+      "token": "{}"
+    }}
+  }},
+  "lastGood": {{
+    "{}": "{}"
+  }},
+  "usageStats": {{}}
+}}"#, profile_name, config.provider, config.api_key, config.provider, profile_name);
+
+    fs::write(agents_dir.join("auth-profiles.json"), auth_profiles_json).map_err(|e| e.to_string())?;
 
     // Identity files (Identity, User, Soul)...
     // [Keeping previous logic for brevity, re-writing key parts]
@@ -127,34 +192,144 @@ Serve {}."#, config.user_name);
 
 #[command]
 fn start_gateway() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let openclaw_root = home.join(".openclaw");
+    let config_path = openclaw_root.join("openclaw.json");
+
     // Stop any existing instance first
-    let _ = Command::new("openclaw").args(&["gateway", "stop"]).output();
+    let _ = shell_command("openclaw gateway stop");
+    thread::sleep(Duration::from_secs(2));
 
-    // Start in background (daemon mode)
-    // We use std::process::Command to spawn it.
-    let child = Command::new("openclaw")
-        .args(&["gateway", "start", "--background"])
-        .spawn()
-        .map_err(|e| format!("Failed to start gateway: {}", e))?;
+    // Backup our config if it exists (we'll merge it back after gateway install)
+    let our_config = if config_path.exists() {
+        Some(fs::read_to_string(&config_path).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
 
-    Ok("Gateway started.".into())
+    // Install gateway service
+    let install_output = shell_command("openclaw gateway install --force")?;
+
+    // Check for any error messages in install output
+    if install_output.to_lowercase().contains("error") || install_output.to_lowercase().contains("failed") {
+        return Err(format!("Gateway installation may have failed: {}", install_output));
+    }
+
+    // If we had a config before, merge it back
+    if let Some(old_config) = our_config {
+        // Read the newly generated config with auth token
+        let new_config = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+
+        // Parse both configs
+        let mut new_json: serde_json::Value = serde_json::from_str(&new_config)
+            .map_err(|e| format!("Failed to parse new config: {}", e))?;
+        let old_json: serde_json::Value = serde_json::from_str(&old_config)
+            .map_err(|e| format!("Failed to parse old config: {}", e))?;
+
+        // Merge key sections from old config (preserve gateway.auth from new config)
+        if let Some(agents) = old_json.get("agents") {
+            new_json["agents"] = agents.clone();
+        }
+        if let Some(auth) = old_json.get("auth") {
+            new_json["auth"] = auth.clone();
+        }
+        if let Some(messages) = old_json.get("messages") {
+            new_json["messages"] = messages.clone();
+        }
+        if let Some(plugins) = old_json.get("plugins") {
+            new_json["plugins"] = plugins.clone();
+        }
+        if let Some(channels) = old_json.get("channels") {
+            new_json["channels"] = channels.clone();
+        }
+
+        // Write merged config back
+        let merged = serde_json::to_string_pretty(&new_json)
+            .map_err(|e| format!("Failed to serialize merged config: {}", e))?;
+        fs::write(&config_path, merged).map_err(|e| e.to_string())?;
+    }
+
+    // Start the gateway (runs natively on macOS, not via Docker)
+    let start_output = shell_command("openclaw gateway start")?;
+
+    // Check for errors in start output
+    if start_output.to_lowercase().contains("error") || start_output.to_lowercase().contains("failed") {
+        return Err(format!("Gateway start may have failed: {}", start_output));
+    }
+
+    // Give it time to initialize - native process startup
+    thread::sleep(Duration::from_secs(5));
+
+    // Try to verify it's actually accessible via network with multiple attempts
+    let mut last_error = String::new();
+    for attempt in 1..=8 {
+        // Try to connect to the gateway port (18789)
+        if TcpStream::connect("127.0.0.1:18789").is_ok() {
+            // Port is open, gateway is listening!
+            return Ok("Gateway started successfully and is accessible on port 18789.".to_string());
+        }
+
+        // Check status output for diagnostic info
+        if let Ok(status) = shell_command("openclaw gateway status") {
+            let status_lower = status.to_lowercase();
+            last_error = format!("Status: {} | Port 18789: not accessible", status.trim());
+
+            // If status indicates it's running but port isn't open yet, keep waiting
+            if status_lower.contains("starting") || status_lower.contains("initializing") {
+                last_error = format!("Gateway is starting... (attempt {}/8)", attempt);
+            }
+        } else {
+            last_error = format!("Gateway status check failed (attempt {}/8)", attempt);
+        }
+
+        if attempt < 8 {
+            thread::sleep(Duration::from_secs(3));
+        }
+    }
+
+    // Get final status for error message
+    let final_status = shell_command("openclaw gateway status")
+        .unwrap_or_else(|_| "Unable to get status".to_string());
+
+    Err(format!(
+        "Gateway did not become accessible on port 18789 after 24+ seconds.\n\
+        Last status: {}\n\
+        Final gateway status:\n{}\n\n\
+        Troubleshooting:\n\
+        1. Check gateway logs: 'openclaw gateway logs'\n\
+        2. Check gateway status: 'openclaw gateway status'\n\
+        3. Try manual start: 'openclaw gateway stop && openclaw gateway start'\n\
+        4. Check if port 18789 is in use: 'lsof -i :18789'",
+        last_error,
+        final_status
+    ))
 }
 
 #[command]
 fn generate_pairing_code() -> Result<String, String> {
-    // Wait a bit for gateway to be ready
-    thread::sleep(Duration::from_secs(3));
+    // Give gateway a bit more time if needed
+    thread::sleep(Duration::from_secs(2));
 
-    let output = Command::new("openclaw")
-        .args(&["pairing", "create", "--channel", "telegram"])
+    // Try to verify gateway is accessible (but don't fail if we can't verify)
+    let _ = shell_command("openclaw gateway status");
+
+    // OpenClaw doesn't have a "pairing create" command.
+    // The flow is: user sends a message to the bot, then checks pending requests.
+    // Return instructions for the user.
+    Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically once it receives your message.".to_string())
+}
+
+// Helper to run shell commands with proper PATH (fixes macOS Tauri PATH issue)
+fn shell_command(cmd: &str) -> Result<String, String> {
+    let output = Command::new("/bin/zsh")
+        .arg("-l")
+        .arg("-c")
+        .arg(cmd)
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
 
     if output.status.success() {
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        // The CLI might output extra text, we should try to extract the code
-        // For now, return raw output (it's usually just the code or a sentence containing it)
-        Ok(raw)
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }

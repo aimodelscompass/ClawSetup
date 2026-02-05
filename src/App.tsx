@@ -15,23 +15,31 @@ function App() {
   const [agentName, setAgentName] = useState("");
   const [agentVibe, setAgentVibe] = useState("Professional");
   const [apiKey, setApiKey] = useState("");
-  const [provider, setProvider] = useState("anthropic"); 
-  const [model, setModel] = useState("anthropic/claude-3-5-sonnet-20240620");
+  const [provider, setProvider] = useState("anthropic");
+  const [model, setModel] = useState("anthropic/claude-haiku-4-5-20251001");
   const [telegramToken, setTelegramToken] = useState("");
+  const [progress, setProgress] = useState("");
 
   useEffect(() => { checkSystem(); }, []);
 
   async function checkSystem() {
     const res: any = await invoke("check_prerequisites");
-    setChecks({ node: res.node_installed, docker: res.docker_running, openclaw: res.openclaw_installed });
+    setChecks({
+      node: res.node_installed,
+      docker: res.docker_running, // Keep for backward compat but not displayed
+      openclaw: res.openclaw_installed
+    });
   }
 
   async function handleInstall() {
     setLoading(true);
+    setProgress("Starting setup...");
     try {
+      setProgress("Installing OpenClaw (this may take a minute)...");
       setLogs("Installing OpenClaw (this may take a minute)...");
       if (!checks.openclaw) await invoke("install_openclaw");
-      
+
+      setProgress("Configuring agent...");
       setLogs("Configuring...");
       await invoke("configure_agent", {
         config: {
@@ -45,15 +53,19 @@ function App() {
         }
       });
 
+      setProgress("Starting Gateway (this may take 20-30 seconds)...");
       setLogs("Starting Gateway...");
       await invoke("start_gateway");
-      
+
+      setProgress("Finalizing setup...");
       setLogs("Generating Pairing Code...");
       const code: string = await invoke("generate_pairing_code");
       setPairingCode(code);
-      
+
+      setProgress("");
       setStep(6); // Go to pairing
     } catch (e) {
+      setProgress("");
       setLogs("Error: " + e);
     }
     setLoading(false);
@@ -67,7 +79,7 @@ function App() {
         <div className="step">
           <h2>1. System Check</h2>
           <div className="check-item">Node.js: {checks.node ? "✅" : "❌"}</div>
-          <div className="check-item">Docker: {checks.docker ? "✅" : "❌"}</div>
+          <div className="check-item">OpenClaw: {checks.openclaw ? "✅ Installed" : "⏳ Will install"}</div>
           <button disabled={!checks.node} onClick={() => setStep(2)}>Next: Identity</button>
         </div>
       )}
@@ -105,8 +117,10 @@ function App() {
           
           <label>Model</label>
           <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
-            <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus</option>
+            <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Recommended - Fast & Cheap)</option>
+            <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Most Capable)</option>
+            <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (Legacy)</option>
+            <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus (Legacy)</option>
             <option value="openai/gpt-4o">GPT-4o</option>
             <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
             <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
@@ -124,7 +138,8 @@ function App() {
           <h2>5. Connect Telegram (Optional)</h2>
           <p>Create a bot via @BotFather and paste the token.</p>
           <input placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
-          <button onClick={handleInstall}>{loading ? "Installing..." : "Finish Setup"}</button>
+          <button onClick={handleInstall} disabled={loading}>{loading ? "Installing..." : "Finish Setup"}</button>
+          {progress && <div style={{ marginTop: "10px", color: "#0084ff", fontWeight: "bold" }}>{progress}</div>}
           <pre>{logs}</pre>
         </div>
       )}
@@ -132,8 +147,8 @@ function App() {
       {step === 6 && (
         <div className="step">
           <h2>🎉 It's Alive!</h2>
-          <p>Your agent is running.</p>
-          
+          <p>Your agent is running on <strong>http://127.0.0.1:18789</strong></p>
+
           {pairingCode && (
             <div className="pairing-box">
               <h3>Pairing Code</h3>
@@ -142,7 +157,10 @@ function App() {
             </div>
           )}
 
-          <button onClick={() => open("http://localhost:8080")}>Open Dashboard</button>
+          <button onClick={() => open("http://127.0.0.1:18789")}>Open Dashboard</button>
+          <p style={{ marginTop: "20px", fontSize: "0.9em", color: "#666" }}>
+            To chat via terminal: <code>openclaw tui</code>
+          </p>
         </div>
       )}
     </div>
