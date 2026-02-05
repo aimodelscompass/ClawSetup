@@ -138,8 +138,10 @@ function App() {
           
           <label>Model</label>
           <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Recommended - Fast & Cheap)</option>
-            <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Most Capable)</option>
+            <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Most Powerful)</option>
+            <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5 (Powerful)</option>
+            <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Balanced)</option>
+            <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast & Cheap)</option>
             <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (Legacy)</option>
             <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus (Legacy)</option>
             <option value="openai/gpt-4o">GPT-4o</option>
