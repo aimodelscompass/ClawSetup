@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
+import { open } from "@tauri-apps/api/shell";
 import "./App.css";
 
 function App() {
@@ -7,45 +8,51 @@ function App() {
   const [checks, setChecks] = useState({ node: false, docker: false, openclaw: false });
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
 
   // Form Data
   const [userName, setUserName] = useState("");
-  const [agentName, setAgentName] = useState("Claw");
+  const [agentName, setAgentName] = useState("");
   const [agentVibe, setAgentVibe] = useState("Professional");
   const [apiKey, setApiKey] = useState("");
-  const [provider, setProvider] = useState("anthropic"); // default
+  const [provider, setProvider] = useState("anthropic"); 
+  const [model, setModel] = useState("anthropic/claude-3-5-sonnet-20240620");
+  const [telegramToken, setTelegramToken] = useState("");
 
-  useEffect(() => {
-    checkSystem();
-  }, []);
+  useEffect(() => { checkSystem(); }, []);
 
   async function checkSystem() {
     const res: any = await invoke("check_prerequisites");
-    setChecks({
-      node: res.node_installed,
-      docker: res.docker_running,
-      openclaw: res.openclaw_installed,
-    });
+    setChecks({ node: res.node_installed, docker: res.docker_running, openclaw: res.openclaw_installed });
   }
 
   async function handleInstall() {
     setLoading(true);
-    setLogs("Installing OpenClaw via npm...");
     try {
-      await invoke("install_openclaw");
-      setLogs("Configuring Identity & Memory...");
+      setLogs("Installing OpenClaw (this may take a minute)...");
+      if (!checks.openclaw) await invoke("install_openclaw");
+      
+      setLogs("Configuring...");
       await invoke("configure_agent", {
         config: {
           provider,
           api_key: apiKey,
-          model: provider === "anthropic" ? "anthropic/claude-3-5-sonnet-20240620" : "openai/gpt-4o",
+          model,
           user_name: userName,
           agent_name: agentName,
-          agent_vibe: agentVibe
+          agent_vibe: agentVibe,
+          telegram_token: telegramToken
         }
       });
-      setLogs("Done! Launching Dashboard...");
-      setStep(5); // Success
+
+      setLogs("Starting Gateway...");
+      await invoke("start_gateway");
+      
+      setLogs("Generating Pairing Code...");
+      const code: string = await invoke("generate_pairing_code");
+      setPairingCode(code);
+      
+      setStep(6); // Go to pairing
     } catch (e) {
       setLogs("Error: " + e);
     }
@@ -61,22 +68,14 @@ function App() {
           <h2>1. System Check</h2>
           <div className="check-item">Node.js: {checks.node ? "✅" : "❌"}</div>
           <div className="check-item">Docker: {checks.docker ? "✅" : "❌"}</div>
-          
-          <button disabled={!checks.node} onClick={() => setStep(2)}>
-            Next: Identity
-          </button>
-          {!checks.node && <p className="error">Please install Node.js first.</p>}
+          <button disabled={!checks.node} onClick={() => setStep(2)}>Next: Identity</button>
         </div>
       )}
 
       {step === 2 && (
         <div className="step">
           <h2>2. Who are you?</h2>
-          <input 
-            placeholder="Your Name (e.g. Dr. Mulu)" 
-            value={userName} 
-            onChange={(e) => setUserName(e.target.value)} 
-          />
+          <input placeholder="David" value={userName} onChange={(e) => setUserName(e.target.value)} />
           <button disabled={!userName} onClick={() => setStep(3)}>Next</button>
         </div>
       )}
@@ -84,48 +83,66 @@ function App() {
       {step === 3 && (
         <div className="step">
           <h2>3. Create your Agent</h2>
-          <input 
-            placeholder="Agent Name (e.g. Jeeves)" 
-            value={agentName} 
-            onChange={(e) => setAgentName(e.target.value)} 
-          />
+          <label>Name</label>
+          <input placeholder="Jeeves" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
+          <label>Vibe</label>
           <select value={agentVibe} onChange={(e) => setAgentVibe(e.target.value)}>
-            <option>Professional</option>
-            <option>Friendly</option>
-            <option>Chaos</option>
+            <option>Professional</option><option>Friendly</option><option>Chaos</option>
           </select>
-          <button onClick={() => setStep(4)}>Next</button>
+          <button disabled={!agentName} onClick={() => setStep(4)}>Next</button>
         </div>
       )}
 
       {step === 4 && (
         <div className="step">
           <h2>4. Connect Brain</h2>
+          <label>Provider</label>
           <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (GPT-4)</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="google">Google</option>
           </select>
-          <input 
-            type="password" 
-            placeholder="sk-..." 
-            value={apiKey} 
-            onChange={(e) => setApiKey(e.target.value)} 
-          />
-          <button disabled={!apiKey} onClick={handleInstall}>
-            {loading ? "Installing..." : "Install & Setup"}
-          </button>
-          <pre>{logs}</pre>
+          
+          <label>Model</label>
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+            <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus</option>
+            <option value="openai/gpt-4o">GPT-4o</option>
+            <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+          </select>
+
+          <label>API Key</label>
+          <input type="password" placeholder="sk-..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          
+          <button disabled={!apiKey} onClick={() => setStep(5)}>Next: Channels</button>
         </div>
       )}
 
       {step === 5 && (
         <div className="step">
-          <h2>🎉 Success!</h2>
-          <p>OpenClaw is installed and configured.</p>
-          <p>Agent: <b>{agentName}</b> is ready to serve <b>{userName}</b>.</p>
-          <button onClick={() => window.open("http://localhost:8080", "_blank")}>
-            Open Dashboard
-          </button>
+          <h2>5. Connect Telegram (Optional)</h2>
+          <p>Create a bot via @BotFather and paste the token.</p>
+          <input placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
+          <button onClick={handleInstall}>{loading ? "Installing..." : "Finish Setup"}</button>
+          <pre>{logs}</pre>
+        </div>
+      )}
+
+      {step === 6 && (
+        <div className="step">
+          <h2>🎉 It's Alive!</h2>
+          <p>Your agent is running.</p>
+          
+          {pairingCode && (
+            <div className="pairing-box">
+              <h3>Pairing Code</h3>
+              <div className="code">{pairingCode}</div>
+              <p>Send this code to your Telegram bot to finish.</p>
+            </div>
+          )}
+
+          <button onClick={() => open("http://localhost:8080")}>Open Dashboard</button>
         </div>
       )}
     </div>

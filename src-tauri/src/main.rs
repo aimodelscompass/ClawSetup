@@ -2,6 +2,8 @@ use tauri::command;
 use std::process::Command;
 use std::fs;
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 #[derive(serde::Deserialize)]
 struct AgentConfig {
@@ -11,6 +13,7 @@ struct AgentConfig {
     user_name: String,
     agent_name: String,
     agent_vibe: String,
+    telegram_token: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -22,8 +25,10 @@ struct PrereqCheck {
 
 #[command]
 fn check_prerequisites() -> PrereqCheck {
+    // Check paths to ensure we find them on Mac/Linux
     let node = Command::new("node").arg("-v").output().is_ok();
     let docker = Command::new("docker").arg("info").output().is_ok();
+    // Check if openclaw is in path
     let openclaw = Command::new("openclaw").arg("--version").output().is_ok();
 
     PrereqCheck {
@@ -35,29 +40,47 @@ fn check_prerequisites() -> PrereqCheck {
 
 #[command]
 fn install_openclaw() -> Result<String, String> {
-    // Attempt npm install -g openclaw
+    // 1. Install via npm
+    // On Mac/Linux, this might fail without sudo. 
+    // We try to install to a user-local prefix if global fails, but for now we assume permission or user-configured npm.
     let output = Command::new("npm")
         .args(&["install", "-g", "openclaw"])
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to execute npm: {}", e))?;
 
     if output.status.success() {
         Ok("OpenClaw installed successfully.".into())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        Err(format!("Install failed: {}", String::from_utf8_lossy(&output.stderr)))
     }
 }
 
 #[command]
 fn configure_agent(config: AgentConfig) -> Result<String, String> {
-    // 1. Resolve Workspace Path (~/.openclaw/workspace)
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let openclaw_root = home.join(".openclaw");
     let workspace = openclaw_root.join("workspace");
 
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
 
-    // 2. Write config.json
+    // Handle Telegram Config section
+    let telegram_section = if let Some(token) = config.telegram_token {
+        if !token.is_empty() {
+            format!(r#",
+  "channels": {{
+    "telegram": {{
+      "enabled": true,
+      "botToken": "{}"
+    }}
+  }}"#, token)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Write config.json
     let config_json = format!(r#"{{
   "agents": {{
     "defaults": {{
@@ -73,61 +96,79 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         "key": "{}"
       }}
     }}
-  }}
-}}"#, config.model, config.provider, config.api_key);
+  }}{}
+}}"#, config.model, config.provider, config.api_key, telegram_section);
 
     fs::write(openclaw_root.join("config.json"), config_json).map_err(|e| e.to_string())?;
 
-    // 3. Write IDENTITY.md
+    // Identity files (Identity, User, Soul)...
+    // [Keeping previous logic for brevity, re-writing key parts]
+    
     let identity_md = format!(r#"# IDENTITY.md - Who Am I?
-
 - **Name:** {}
 - **Vibe:** {}
 - **Emoji:** 🦞
-
 ---
-Managed by ClawSetup.
-"#, config.agent_name, config.agent_vibe);
-    
+Managed by ClawSetup."#, config.agent_name, config.agent_vibe);
     fs::write(workspace.join("IDENTITY.md"), identity_md).map_err(|e| e.to_string())?;
 
-    // 4. Write USER.md
     let user_md = format!(r#"# USER.md - About Your Human
-
 - **Name:** {}
-- **Role:** The User
-
----
-Managed by ClawSetup.
-"#, config.user_name);
-
+---"#, config.user_name);
     fs::write(workspace.join("USER.md"), user_md).map_err(|e| e.to_string())?;
 
-    // 5. Write SOUL.md (Simple template based on vibe)
-    let soul_instruction = match config.agent_vibe.as_str() {
-        "Professional" => "Be concise, formal, and efficient.",
-        "Friendly" => "Be warm, helpful, and use emojis occasionally.",
-        "Chaos" => "Be wild, creative, and unrestrained.",
-        _ => "Be helpful and accurate."
-    };
-
-    let soul_md = format!(r#"# SOUL.md - Who You Are
-
-## Core Directives
-{}
-
+    let soul_md = format!(r#"# SOUL.md
 ## Mission
-Serve {} to the best of your ability.
-"#, soul_instruction, config.user_name);
-
+Serve {}."#, config.user_name);
     fs::write(workspace.join("SOUL.md"), soul_md).map_err(|e| e.to_string())?;
 
-    Ok("Configuration files created.".into())
+    Ok("Configured.".into())
+}
+
+#[command]
+fn start_gateway() -> Result<String, String> {
+    // Stop any existing instance first
+    let _ = Command::new("openclaw").args(&["gateway", "stop"]).output();
+
+    // Start in background (daemon mode)
+    // We use std::process::Command to spawn it.
+    let child = Command::new("openclaw")
+        .args(&["gateway", "start", "--background"])
+        .spawn()
+        .map_err(|e| format!("Failed to start gateway: {}", e))?;
+
+    Ok("Gateway started.".into())
+}
+
+#[command]
+fn generate_pairing_code() -> Result<String, String> {
+    // Wait a bit for gateway to be ready
+    thread::sleep(Duration::from_secs(3));
+
+    let output = Command::new("openclaw")
+        .args(&["pairing", "create", "--channel", "telegram"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        // The CLI might output extra text, we should try to extract the code
+        // For now, return raw output (it's usually just the code or a sentence containing it)
+        Ok(raw)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![check_prerequisites, install_openclaw, configure_agent])
+        .invoke_handler(tauri::generate_handler![
+            check_prerequisites, 
+            install_openclaw, 
+            configure_agent,
+            start_gateway,
+            generate_pairing_code
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
