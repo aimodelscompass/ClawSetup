@@ -326,14 +326,25 @@ fn generate_pairing_code() -> Result<String, String> {
 #[command]
 fn approve_pairing(code: String) -> Result<String, String> {
     // Run: openclaw pairing approve <code> --channel telegram
-    let output = shell_command(&format!("openclaw pairing approve {} --channel telegram", code))?;
+    let output = shell_command(&format!("openclaw pairing approve {} --channel telegram", code));
     
-    // Check for success or error in output
-    if output.to_lowercase().contains("error") {
-        return Err(output);
+    match output {
+        Ok(out) => {
+            if out.to_lowercase().contains("error") {
+                if out.contains("No pending pairing request found") {
+                    return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
+                }
+                return Err(out);
+            }
+            Ok("Pairing successful!".to_string())
+        },
+        Err(err) => {
+            if err.contains("No pending pairing request found") {
+                return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
+            }
+            Err(err)
+        }
     }
-
-    Ok("Pairing successful!".to_string())
 }
 
 #[command]
@@ -357,12 +368,12 @@ fn get_dashboard_url() -> Result<String, String> {
 fn shell_command(cmd: &str) -> Result<String, String> {
     // On macOS, GUI apps don't inherit the shell's PATH.
     // We source common profile files and manually add common paths.
-    // Using 'sh' style sourcing for maximum compatibility even if it's zsh.
+    // We redirect stderr of sourcing to /dev/null to ignore errors from missing completion files etc.
     let full_cmd = format!(
         "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
-         [ -f /etc/profile ] && . /etc/profile; \
-         [ -f ~/.zprofile ] && . ~/.zprofile; \
-         [ -f ~/.zshrc ] && . ~/.zshrc; \
+         [ -f /etc/profile ] && . /etc/profile > /dev/null 2>&1; \
+         [ -f ~/.zprofile ] && . ~/.zprofile > /dev/null 2>&1; \
+         [ -f ~/.zshrc ] && . ~/.zshrc > /dev/null 2>&1; \
          {}", 
         cmd
     );
