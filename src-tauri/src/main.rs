@@ -351,17 +351,37 @@ fn get_dashboard_url() -> Result<String, String> {
 
 // Helper to run shell commands with proper PATH (fixes macOS Tauri PATH issue)
 fn shell_command(cmd: &str) -> Result<String, String> {
+    // On macOS, GUI apps don't inherit the shell's PATH.
+    // We source common profile files and manually add common paths.
+    // Using 'sh' style sourcing for maximum compatibility even if it's zsh.
+    let full_cmd = format!(
+        "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
+         [ -f /etc/profile ] && . /etc/profile; \
+         [ -f ~/.zprofile ] && . ~/.zprofile; \
+         [ -f ~/.zshrc ] && . ~/.zshrc; \
+         {}", 
+        cmd
+    );
+
     let output = Command::new("/bin/zsh")
-        .arg("-l")
         .arg("-c")
-        .arg(cmd)
+        .arg(full_cmd)
         .output()
         .map_err(|e| format!("Failed to execute command: {}", e))?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Ok(stdout)
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        if !stderr.is_empty() {
+            Err(stderr)
+        } else if !stdout.is_empty() {
+            Err(stdout)
+        } else {
+            Err(format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1)))
+        }
     }
 }
 
