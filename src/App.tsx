@@ -134,19 +134,32 @@ function App() {
             <option value="anthropic">Anthropic</option>
             <option value="openai">OpenAI</option>
             <option value="google">Google</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (Local)</option>
           </select>
           
           <label>Model</label>
           <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Most Powerful)</option>
-            <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5 (Powerful)</option>
-            <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Balanced)</option>
-            <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast & Cheap)</option>
-            <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (Legacy)</option>
-            <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus (Legacy)</option>
-            <option value="openai/gpt-4o">GPT-4o</option>
-            <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
-            <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+            <optgroup label="Anthropic">
+              <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Most Powerful)</option>
+              <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5 (Powerful)</option>
+              <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Balanced)</option>
+              <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast & Cheap)</option>
+              <option value="anthropic/claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Latest)</option>
+            </optgroup>
+            <optgroup label="OpenAI">
+              <option value="openai/gpt-4o">GPT-4o</option>
+              <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+              <option value="openai/o1-preview">o1 Preview</option>
+            </optgroup>
+            <optgroup label="Google">
+              <option value="google/gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</option>
+              <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+            </optgroup>
+            <optgroup label="Ollama (Local)">
+              <option value="ollama/llama3.2">Llama 3.2</option>
+              <option value="ollama/mistral">Mistral</option>
+            </optgroup>
           </select>
 
           <label>API Key</label>

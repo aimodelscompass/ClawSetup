@@ -4,6 +4,7 @@ use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::net::TcpStream;
+use rand::Rng;
 
 #[derive(serde::Deserialize)]
 struct AgentConfig {
@@ -48,11 +49,6 @@ fn install_openclaw() -> Result<String, String> {
     Ok("OpenClaw installed successfully.".to_string())
 }
 
-fn generate_token() -> Result<String, String> {
-    shell_command("node -e 'console.log(crypto.randomUUID())'")
-        .map(|s| s.trim().to_string())
-}
-
 #[command]
 fn configure_agent(config: AgentConfig) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
@@ -63,8 +59,12 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
     fs::create_dir_all(&agents_dir).map_err(|e| e.to_string())?;
 
-    // Generate a secure token for the gateway
-    let gateway_token = generate_token()?;
+    // Generate a random gateway token
+    let gateway_token: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
 
     // Build profile name (e.g., "anthropic:default")
     let profile_name = format!("{}:default", config.provider);
@@ -82,8 +82,13 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
   }},
   "channels": {{
     "telegram": {{
-      "enabled": true,
-      "botToken": "{}"
+      "accounts": {{
+        "main": {{
+          "botToken": "{}",
+          "name": "Primary Bot",
+          "dmPolicy": "pairing"
+        }}
+      }}
     }}
   }}"#, token)
         } else {
@@ -121,6 +126,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     "port": 18789,
     "bind": "loopback",
     "auth": {{
+      "mode": "token",
       "token": "{}"
     }},
     "tailscale": {{
@@ -167,8 +173,6 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     fs::write(agents_dir.join("auth-profiles.json"), auth_profiles_json).map_err(|e| e.to_string())?;
 
     // Identity files (Identity, User, Soul)...
-    // [Keeping previous logic for brevity, re-writing key parts]
-    
     let identity_md = format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
 - **Vibe:** {}
@@ -388,8 +392,8 @@ fn shell_command(cmd: &str) -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            check_prerequisites, 
-            install_openclaw, 
+            check_prerequisites,
+            install_openclaw,
             configure_agent,
             start_gateway,
             generate_pairing_code,
