@@ -31,7 +31,7 @@ function App() {
     const unlisten = listen("log-event", (event: any) => {
       setLogs((prev) => [...prev.slice(-500), event.payload]);
     });
-    
+
     invoke("stream_logs").catch(console.error);
     const statusInterval = setInterval(refreshStatus, 5000);
 
@@ -169,31 +169,31 @@ function App() {
   return (
     <div className="app-container">
       <div className="sidebar">
-        <div 
+        <div
           className={`sidebar-item ${activeTab === "chat" ? "active" : ""}`}
           onClick={() => setActiveTab("chat")}
         >
           <span className="sidebar-icon">💬</span> Chat
         </div>
-        <div 
+        <div
           className={`sidebar-item ${activeTab === "agents" ? "active" : ""}`}
           onClick={() => setActiveTab("agents")}
         >
           <span className="sidebar-icon">🤖</span> Agents
         </div>
-        <div 
+        <div
           className={`sidebar-item ${activeTab === "models" ? "active" : ""}`}
           onClick={() => setActiveTab("models")}
         >
           <span className="sidebar-icon">🧠</span> Models
         </div>
-        <div 
+        <div
           className={`sidebar-item ${activeTab === "connect" ? "active" : ""}`}
           onClick={() => setActiveTab("connect")}
         >
           <span className="sidebar-icon">🔌</span> Connect
         </div>
-        <div 
+        <div
           className={`sidebar-item ${activeTab === "system" ? "active" : ""}`}
           onClick={() => setActiveTab("system")}
         >
@@ -212,7 +212,7 @@ function App() {
         <header className="header">
           <div className="header-title">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</div>
           <div>
-             <button className="secondary" onClick={refreshStatus} style={{ padding: "4px 8px", fontSize: "11px" }}>Refresh</button>
+            <button className="secondary" onClick={refreshStatus} style={{ padding: "4px 8px", fontSize: "11px" }}>Refresh</button>
           </div>
         </header>
 
@@ -251,7 +251,7 @@ function ChatTab({ client }: { client: GatewayClient | null }) {
 
   const handleSend = async () => {
     if (!input.trim() || !client) return;
-    
+
     const userMsg = { role: "user", content: input };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -260,6 +260,7 @@ function ChatTab({ client }: { client: GatewayClient | null }) {
       await client.request("chat.send", {
         message: input,
         sessionKey: "desktop-session",
+        idempotencyKey: crypto.randomUUID()
       });
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: "agent", content: "Error: " + (e.message || JSON.stringify(e)) }]);
@@ -283,9 +284,9 @@ function ChatTab({ client }: { client: GatewayClient | null }) {
         {streamingMessage && <div className="message agent">{streamingMessage}</div>}
       </div>
       <div className="chat-input-container">
-        <input 
-          style={{ flex: 1 }} 
-          placeholder={client ? "Type a message..." : "Connecting to gateway..."} 
+        <input
+          style={{ flex: 1 }}
+          placeholder={client ? "Type a message..." : "Connecting to gateway..."}
           disabled={!client}
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -314,9 +315,9 @@ function AgentsTab({ files, config }: { files: any[], config: any }) {
     // Implementation for adding agent to config
     const newConfig = { ...config };
     newConfig.agents = newConfig.agents || {};
-    newConfig.agents[newAgentName] = { 
-       workspace: config.agents.defaults.workspace,
-       model: config.agents.defaults.model
+    newConfig.agents[newAgentName] = {
+      workspace: config.agents.defaults.workspace,
+      model: config.agents.defaults.model
     };
     await invoke("save_openclaw_config", { config: newConfig });
     setIsAddingAgent(false);
@@ -335,18 +336,18 @@ function AgentsTab({ files, config }: { files: any[], config: any }) {
             🤖 {a}
           </div>
         ))}
-        <button 
-          className="secondary" 
+        <button
+          className="secondary"
           style={{ width: "100%", marginTop: "10px", fontSize: "11px" }}
           onClick={() => setIsAddingAgent(true)}
         >+ New Agent</button>
-        
+
         {isAddingAgent && (
           <div style={{ marginTop: "10px" }}>
-            <input 
-              placeholder="Agent Name" 
-              value={newAgentName} 
-              onChange={e => setNewAgentName(e.target.value)} 
+            <input
+              placeholder="Agent Name"
+              value={newAgentName}
+              onChange={e => setNewAgentName(e.target.value)}
               style={{ width: "100%", marginBottom: "5px" }}
             />
             <button onClick={handleAddAgent} style={{ width: "100%" }}>Create</button>
@@ -355,9 +356,9 @@ function AgentsTab({ files, config }: { files: any[], config: any }) {
 
         <div className="card-title" style={{ marginTop: "20px" }}>Files</div>
         {files.map(f => (
-          <div 
-            key={f.name} 
-            className="sidebar-item" 
+          <div
+            key={f.name}
+            className="sidebar-item"
             style={{ margin: "2px 0" }}
             onClick={() => { setSelectedFile(f); setContent(f.content); }}
           >
@@ -371,7 +372,7 @@ function AgentsTab({ files, config }: { files: any[], config: any }) {
         </div>
         {selectedFile && (
           <>
-            <textarea 
+            <textarea
               style={{ width: "100%", height: "450px", fontFamily: "monospace", resize: "none", padding: "10px" }}
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -398,8 +399,8 @@ function ModelsTab({ config }: { config: any }) {
         <div className="card-title">Providers</div>
         {config?.auth?.profiles && Object.keys(config.auth.profiles).map(p => (
           <div key={p} style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
-             <span>{p}</span>
-             <span style={{ color: "var(--text-secondary)" }}>✓ Connected</span>
+            <span>{p}</span>
+            <span style={{ color: "var(--text-secondary)" }}>✓ Connected</span>
           </div>
         ))}
         <button className="secondary" style={{ width: "100%" }}>+ Add Provider</button>
