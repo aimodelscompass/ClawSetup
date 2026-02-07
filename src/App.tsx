@@ -9,32 +9,42 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState("");
   const [pairingCode, setPairingCode] = useState("");
-  const [dashboardUrl, setDashboardUrl] = useState("");
-  const [userPairingCode, setUserPairingCode] = useState("");
-  const [pairingApproved, setPairingApproved] = useState(false);
 
   // Form Data
   const [userName, setUserName] = useState("");
   const [agentName, setAgentName] = useState("");
   const [agentVibe, setAgentVibe] = useState("Professional");
   const [apiKey, setApiKey] = useState("");
-  const [provider, setProvider] = useState("anthropic"); 
-  const [model, setModel] = useState("anthropic/claude-3-5-sonnet-20240620");
+  const [provider, setProvider] = useState("anthropic");
+  const [model, setModel] = useState("anthropic/claude-haiku-4-5-20251001");
   const [telegramToken, setTelegramToken] = useState("");
+  const [progress, setProgress] = useState("");
+  const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
+  
+  // Pairing Data
+  const [pairingInput, setPairingInput] = useState("");
+  const [pairingStatus, setPairingStatus] = useState("");
 
   useEffect(() => { checkSystem(); }, []);
 
   async function checkSystem() {
     const res: any = await invoke("check_prerequisites");
-    setChecks({ node: res.node_installed, docker: res.docker_running, openclaw: res.openclaw_installed });
+    setChecks({
+      node: res.node_installed,
+      docker: res.docker_running, // Keep for backward compat but not displayed
+      openclaw: res.openclaw_installed
+    });
   }
 
   async function handleInstall() {
     setLoading(true);
+    setProgress("Starting setup...");
     try {
+      setProgress("Installing OpenClaw (this may take a minute)...");
       setLogs("Installing OpenClaw (this may take a minute)...");
       if (!checks.openclaw) await invoke("install_openclaw");
 
+      setProgress("Configuring agent...");
       setLogs("Configuring...");
       await invoke("configure_agent", {
         config: {
@@ -48,37 +58,38 @@ function App() {
         }
       });
 
-      setLogs("Installing and starting Gateway...");
+      setProgress("Starting Gateway (this may take 20-30 seconds)...");
+      setLogs("Starting Gateway...");
       await invoke("start_gateway");
 
-      setLogs("Getting dashboard URL...");
+      setProgress("Finalizing setup...");
+      // Just getting instruction text now
+      const instruction: string = await invoke("generate_pairing_code");
+      setPairingCode(instruction); // "Ready! Send any message..."
+
+      // Get authenticated URL
       const url: string = await invoke("get_dashboard_url");
       setDashboardUrl(url);
 
-      if (telegramToken) {
-        setLogs("Generating Telegram Pairing Code...");
-        const code: string = await invoke("generate_pairing_code");
-        setPairingCode(code.trim());
-      }
-
-      setStep(6); // Go to success screen
+      setProgress("");
+      setStep(6); // Go to pairing
     } catch (e) {
+      setProgress("");
       setLogs("Error: " + e);
     }
     setLoading(false);
   }
 
-  async function handleApprovePairing() {
-    if (!userPairingCode) return;
-    setLoading(true);
+  async function handlePairing() {
+    if (!pairingInput) return;
+    setPairingStatus("Verifying...");
     try {
-      await invoke("approve_pairing", { code: userPairingCode });
-      setPairingApproved(true);
-      setLogs("Pairing approved! You can now chat with your agent on Telegram.");
+      await invoke("approve_pairing", { code: pairingInput });
+      setPairingStatus("✅ Success! Bot paired.");
+      setPairingInput("");
     } catch (e) {
-      setLogs("Error approving pairing: " + e);
+      setPairingStatus("❌ Error: " + e);
     }
-    setLoading(false);
   }
 
   return (
@@ -89,7 +100,7 @@ function App() {
         <div className="step">
           <h2>1. System Check</h2>
           <div className="check-item">Node.js: {checks.node ? "✅" : "❌"}</div>
-          <div className="check-item">Docker: {checks.docker ? "✅" : "❌"}</div>
+          <div className="check-item">OpenClaw: {checks.openclaw ? "✅ Installed" : "⏳ Will install"}</div>
           <button disabled={!checks.node} onClick={() => setStep(2)}>Next: Identity</button>
         </div>
       )}
@@ -120,65 +131,40 @@ function App() {
           <h2>4. Connect Brain</h2>
           <label>Provider</label>
           <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (GPT)</option>
-            <option value="google">Google (Gemini)</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="google">Google</option>
             <option value="openrouter">OpenRouter</option>
-            <option value="amazon-bedrock">Amazon Bedrock</option>
-            <option value="moonshot">Moonshot (Kimi)</option>
-            <option value="minimax">MiniMax</option>
-            <option value="xiaomi">Xiaomi (MiMo)</option>
-            <option value="qwen-portal">Qwen Portal</option>
             <option value="ollama">Ollama (Local)</option>
-            <option value="venice">Venice</option>
-            <option value="github-copilot">GitHub Copilot</option>
           </select>
-
+          
           <label>Model</label>
           <select value={model} onChange={(e) => setModel(e.target.value)}>
             <optgroup label="Anthropic">
+              <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Most Powerful)</option>
+              <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5 (Powerful)</option>
+              <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Balanced)</option>
+              <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast & Cheap)</option>
               <option value="anthropic/claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Latest)</option>
-              <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
-              <option value="anthropic/claude-3-opus-20240229">Claude 3 Opus</option>
-              <option value="anthropic/claude-3-haiku-20240307">Claude 3 Haiku</option>
             </optgroup>
             <optgroup label="OpenAI">
               <option value="openai/gpt-4o">GPT-4o</option>
               <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-              <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
               <option value="openai/o1-preview">o1 Preview</option>
-              <option value="openai/o1-mini">o1 Mini</option>
             </optgroup>
             <optgroup label="Google">
               <option value="google/gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</option>
               <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-              <option value="google/gemini-1.5-flash-latest">Gemini 1.5 Flash</option>
-            </optgroup>
-            <optgroup label="OpenRouter">
-              <option value="openrouter/anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (via OpenRouter)</option>
-              <option value="openrouter/openai/gpt-4o">GPT-4o (via OpenRouter)</option>
-              <option value="openrouter/google/gemini-pro-1.5">Gemini Pro 1.5 (via OpenRouter)</option>
-            </optgroup>
-            <optgroup label="Moonshot">
-              <option value="moonshot/kimi-k2.5-latest">Kimi K2.5 Latest</option>
-              <option value="moonshot/kimi-k1.5-all">Kimi K1.5 All</option>
-            </optgroup>
-            <optgroup label="MiniMax">
-              <option value="minimax/MiniMax-M2.1-Text">MiniMax M2.1 Text</option>
-            </optgroup>
-            <optgroup label="Xiaomi">
-              <option value="xiaomi/MiMo-V2-Flash">MiMo V2 Flash</option>
             </optgroup>
             <optgroup label="Ollama (Local)">
               <option value="ollama/llama3.2">Llama 3.2</option>
               <option value="ollama/mistral">Mistral</option>
-              <option value="ollama/qwen2.5">Qwen 2.5</option>
             </optgroup>
           </select>
 
           <label>API Key</label>
           <input type="password" placeholder="sk-..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-
+          
           <button disabled={!apiKey} onClick={() => setStep(5)}>Next: Channels</button>
         </div>
       )}
@@ -188,7 +174,8 @@ function App() {
           <h2>5. Connect Telegram (Optional)</h2>
           <p>Create a bot via @BotFather and paste the token.</p>
           <input placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
-          <button onClick={handleInstall}>{loading ? "Installing..." : "Finish Setup"}</button>
+          <button onClick={handleInstall} disabled={loading}>{loading ? "Installing..." : "Finish Setup"}</button>
+          {progress && <div style={{ marginTop: "10px", color: "#0084ff", fontWeight: "bold" }}>{progress}</div>}
           <pre>{logs}</pre>
         </div>
       )}
@@ -196,34 +183,32 @@ function App() {
       {step === 6 && (
         <div className="step">
           <h2>🎉 It's Alive!</h2>
-          <p>Your OpenClaw agent is running!</p>
+          <p>Your agent is running on <strong>{dashboardUrl}</strong></p>
 
-          {pairingCode && !pairingApproved && (
-            <div className="pairing-box">
-              <h3>📱 Telegram Pairing</h3>
-              <p><strong>Step 1:</strong> Send a message to your Telegram bot</p>
-              <p><strong>Step 2:</strong> The bot will reply with a pairing code</p>
-              <p><strong>Step 3:</strong> Enter the code below to approve:</p>
-              <input
-                placeholder="Enter 8-character code"
-                value={userPairingCode}
-                onChange={(e) => setUserPairingCode(e.target.value.toUpperCase())}
-                maxLength={8}
-              />
-              <button onClick={handleApprovePairing} disabled={loading || userPairingCode.length !== 8}>
-                {loading ? "Approving..." : "Approve Pairing"}
-              </button>
-            </div>
-          )}
+          <div className="pairing-box">
+             <h3>Telegram Pairing</h3>
+             <p style={{fontSize: "0.9em"}}>{pairingCode || "Message your bot to get a code."}</p>
+             
+             {telegramToken && (
+               <div style={{display: "flex", gap: "10px", marginTop: "10px", flexDirection: "column"}}>
+                 <input 
+                   placeholder="Enter code (e.g. 3RQ8EBFE)" 
+                   value={pairingInput} 
+                   onChange={(e) => setPairingInput(e.target.value)} 
+                   style={{textAlign: "center", letterSpacing: "2px"}}
+                 />
+                 <button onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
+                   {pairingStatus === "Verifying..." ? "Verifying..." : "Verify & Pair"}
+                 </button>
+                 {pairingStatus && <div style={{fontWeight: "bold", color: pairingStatus.includes("Error") ? "red" : "green"}}>{pairingStatus}</div>}
+               </div>
+             )}
+          </div>
 
-          {pairingApproved && (
-            <div className="success-message">
-              ✅ Telegram paired successfully!
-            </div>
-          )}
-
-          <button onClick={() => dashboardUrl && open(dashboardUrl)}>Open Dashboard</button>
-          {logs && <pre>{logs}</pre>}
+          <button onClick={() => open(dashboardUrl)} style={{marginTop: "20px"}}>Open Dashboard</button>
+          <p style={{ marginTop: "20px", fontSize: "0.9em", color: "#666" }}>
+            To chat via terminal: <code>openclaw tui</code>
+          </p>
         </div>
       )}
     </div>
