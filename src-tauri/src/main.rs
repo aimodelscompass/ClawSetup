@@ -330,8 +330,9 @@ fn approve_pairing(code: String) -> Result<String, String> {
     
     match output {
         Ok(out) => {
-            if out.to_lowercase().contains("error") {
-                if out.contains("No pending pairing request found") {
+            let out_lower = out.to_lowercase();
+            if out_lower.contains("error") {
+                if out_lower.contains("no pending pairing request found") {
                     return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
                 }
                 return Err(out);
@@ -339,7 +340,8 @@ fn approve_pairing(code: String) -> Result<String, String> {
             Ok("Pairing successful!".to_string())
         },
         Err(err) => {
-            if err.contains("No pending pairing request found") {
+            let err_lower = err.to_lowercase();
+            if err_lower.contains("no pending pairing request found") {
                 return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
             }
             Err(err)
@@ -368,12 +370,12 @@ fn get_dashboard_url() -> Result<String, String> {
 fn shell_command(cmd: &str) -> Result<String, String> {
     // On macOS, GUI apps don't inherit the shell's PATH.
     // We source common profile files and manually add common paths.
-    // We redirect stderr of sourcing to /dev/null to ignore errors from missing completion files etc.
+    // We redirect ALL preamble output to /dev/null.
     let full_cmd = format!(
         "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
-         [ -f /etc/profile ] && . /etc/profile > /dev/null 2>&1; \
-         [ -f ~/.zprofile ] && . ~/.zprofile > /dev/null 2>&1; \
-         [ -f ~/.zshrc ] && . ~/.zshrc > /dev/null 2>&1; \
+         {{ [ -f /etc/profile ] && . /etc/profile; \
+           [ -f ~/.zprofile ] && . ~/.zprofile; \
+           [ -f ~/.zshrc ] && . ~/.zshrc; }} > /dev/null 2>&1; \
          {}", 
         cmd
     );
@@ -390,13 +392,23 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     if output.status.success() {
         Ok(stdout)
     } else {
-        if !stderr.is_empty() {
-            Err(stderr)
+        // Strip common shell preamble errors from stderr if they somehow leaked
+        let cleaned_stderr = stderr.lines()
+            .filter(|line| !line.contains(".zshrc") && !line.contains(".zprofile") && !line.contains("no such file or directory"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let err_to_return = if !cleaned_stderr.trim().is_empty() {
+            cleaned_stderr
+        } else if !stderr.is_empty() {
+            stderr
         } else if !stdout.is_empty() {
-            Err(stdout)
+            stdout
         } else {
-            Err(format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1)))
-        }
+            format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1))
+        };
+
+        Err(err_to_return)
     }
 }
 
