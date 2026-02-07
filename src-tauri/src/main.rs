@@ -1,12 +1,13 @@
-use tauri::command;
+use tauri::{command, Manager, Window};
 use std::process::Command;
 use std::fs;
 use std::thread;
 use std::time::Duration;
-use std::net::TcpStream;
+use std::io::{BufRead, BufReader};
+use serde::{Deserialize, Serialize};
 use rand::Rng;
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize, Serialize, Clone)]
 struct AgentConfig {
     provider: String,
     api_key: String,
@@ -17,36 +18,36 @@ struct AgentConfig {
     telegram_token: Option<String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct PrereqCheck {
     node_installed: bool,
-    docker_running: bool,
     openclaw_installed: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WorkspaceFile {
+    name: String,
+    content: String,
 }
 
 #[command]
 fn check_prerequisites() -> PrereqCheck {
-    // Use shell_command to properly source user's PATH
     let node = shell_command("node -v").is_ok();
-    // Docker not needed on macOS - OpenClaw runs natively
     let openclaw = shell_command("openclaw --version").is_ok();
-
     PrereqCheck {
         node_installed: node,
-        docker_running: true, // Always true on macOS (not needed)
         openclaw_installed: openclaw,
     }
 }
 
 #[command]
 fn install_openclaw() -> Result<String, String> {
-    // Install via npm using shell_command for proper PATH
+    // Attempt installation
     shell_command("npm install -g openclaw")?;
-
-    // Verify installation
-    shell_command("openclaw --version")?;
-
-    Ok("OpenClaw installed successfully.".to_string())
+    
+    // Verify installation and get version
+    let version = shell_command("openclaw --version")?;
+    Ok(format!("OpenClaw installed successfully: {}", version.trim()))
 }
 
 #[command]
@@ -66,316 +67,187 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         .map(char::from)
         .collect();
 
-    // Build profile name (e.g., "anthropic:default")
     let profile_name = format!("{}:default", config.provider);
 
-    // Handle Telegram config section
-    let telegram_section = if let Some(token) = config.telegram_token {
-        if !token.is_empty() {
-            format!(r#",
-  "plugins": {{
-    "entries": {{
-      "telegram": {{
-        "enabled": true
-      }}
-    }}
-  }},
-  "channels": {{
-    "telegram": {{
-      "accounts": {{
-        "main": {{
-          "botToken": "{}",
-          "name": "Primary Bot",
-          "dmPolicy": "pairing"
-        }}
-      }}
-    }}
-  }}"#, token)
-        } else {
-            String::new()
+    // Standard OpenClaw config structure
+    let config_json = serde_json::json!({
+      "meta": {
+        "lastTouchedVersion": "2026.2.6-3",
+        "lastTouchedAt": ""
+      },
+      "messages": { "ackReactionScope": "group-mentions" },
+      "agents": {
+        "defaults": {
+          "maxConcurrent": 4,
+          "subagents": { "maxConcurrent": 8 },
+          "compaction": { "mode": "safeguard" },
+          "workspace": workspace.to_string_lossy(),
+          "model": { "primary": config.model },
+          "models": {
+            config.model.clone(): {}
+          }
         }
-    } else {
-        String::new()
-    };
+      },
+      "gateway": {
+        "mode": "local",
+        "port": 18789,
+        "bind": "loopback",
+        "auth": { "mode": "token", "token": gateway_token },
+        "tailscale": { "mode": "off", "resetOnExit": false }
+      },
+      "auth": {
+        "profiles": {
+          &profile_name: { "provider": config.provider, "mode": "token" }
+        }
+      },
+      "plugins": {
+        "entries": {
+          "telegram": { "enabled": config.telegram_token.is_some() }
+        }
+      }
+    });
 
-    // Write openclaw.json (NOT config.json!)
-    let config_json = format!(r#"{{
-  "messages": {{
-    "ackReactionScope": "group-mentions"
-  }},
-  "agents": {{
-    "defaults": {{
-      "maxConcurrent": 4,
-      "subagents": {{
-        "maxConcurrent": 8
-      }},
-      "compaction": {{
-        "mode": "safeguard"
-      }},
-      "workspace": "{}",
-      "model": {{
-        "primary": "{}"
-      }},
-      "models": {{
-        "{}": {{}}
-      }}
-    }}
-  }},
-  "gateway": {{
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
-    "auth": {{
-      "mode": "token",
-      "token": "{}"
-    }},
-    "tailscale": {{
-      "mode": "off",
-      "resetOnExit": false
-    }}
-  }},
-  "auth": {{
-    "profiles": {{
-      "{}": {{
-        "provider": "{}",
-        "mode": "token"
-      }}
-    }}
-  }}{}
-}}"#,
-        workspace.to_string_lossy(),
-        config.model,
-        config.model,
-        gateway_token,
-        profile_name,
-        config.provider,
-        telegram_section
-    );
-
-    fs::write(openclaw_root.join("openclaw.json"), config_json).map_err(|e| e.to_string())?;
-
-    // Write auth-profiles.json with the actual API key
-    let auth_profiles_json = format!(r#"{{
-  "version": 1,
-  "profiles": {{
-    "{}": {{
-      "type": "token",
-      "provider": "{}",
-      "token": "{}"
-    }}
-  }},
-  "lastGood": {{
-    "{}": "{}"
-  }},
-  "usageStats": {{}}
-}}"#, profile_name, config.provider, config.api_key, config.provider, profile_name);
-
-    fs::write(agents_dir.join("auth-profiles.json"), auth_profiles_json).map_err(|e| e.to_string())?;
-
-    // Identity files (Identity, User, Soul)...
-    let identity_md = format!(r#"# IDENTITY.md - Who Am I?
-- **Name:** {}
-- **Vibe:** {}
-- **Emoji:** 🦞
----
-Managed by ClawSetup."#, config.agent_name, config.agent_vibe);
-    fs::write(workspace.join("IDENTITY.md"), identity_md).map_err(|e| e.to_string())?;
-
-    let user_md = format!(r#"# USER.md - About Your Human
-- **Name:** {}
----"#, config.user_name);
-    fs::write(workspace.join("USER.md"), user_md).map_err(|e| e.to_string())?;
-
-    let soul_md = format!(r#"# SOUL.md
-## Mission
-Serve {}."#, config.user_name);
-    fs::write(workspace.join("SOUL.md"), soul_md).map_err(|e| e.to_string())?;
-
-    Ok("Configured.".into())
-}
-
-#[command]
-fn start_gateway() -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let openclaw_root = home.join(".openclaw");
     let config_path = openclaw_root.join("openclaw.json");
+    fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap()).map_err(|e| e.to_string())?;
 
-    // Stop any existing instance first
-    let _ = shell_command("openclaw gateway stop");
-    thread::sleep(Duration::from_secs(2));
+    // Write auth-profiles.json for the main agent
+    let auth_profiles_json = serde_json::json!({
+      "version": 1,
+      "profiles": {
+        &profile_name: { "type": "token", "provider": config.provider, "token": config.api_key }
+      },
+      "lastGood": { &config.provider: &profile_name }
+    });
 
-    // Backup our config if it exists (we'll merge it back after gateway install)
-    let our_config = if config_path.exists() {
-        Some(fs::read_to_string(&config_path).map_err(|e| e.to_string())?)
-    } else {
-        None
-    };
+    fs::write(agents_dir.join("auth-profiles.json"), serde_json::to_string_pretty(&auth_profiles_json).unwrap()).map_err(|e| e.to_string())?;
 
-    // Install gateway service
-    let install_output = shell_command("openclaw gateway install --force")?;
+    // Initial Identity files
+    fs::write(workspace.join("IDENTITY.md"), format!("# IDENTITY.md\n\nI am {}, an AI agent powered by OpenClaw.\n\nVibe: {}", config.agent_name, config.agent_vibe)).ok();
+    fs::write(workspace.join("USER.md"), format!("# USER.md\n\nAbout my human: {}\n", config.user_name)).ok();
+    fs::write(workspace.join("SOUL.md"), "# SOUL.md\n\n## Mission\nProvide excellent assistance and maintain a helpful attitude.\n").ok();
 
-    // Check for any error messages in install output
-    if install_output.to_lowercase().contains("error") || install_output.to_lowercase().contains("failed") {
-        return Err(format!("Gateway installation may have failed: {}", install_output));
-    }
-
-    // If we had a config before, merge it back
-    if let Some(old_config) = our_config {
-        // Read the newly generated config with auth token
-        let new_config = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-
-        // Parse both configs
-        let mut new_json: serde_json::Value = serde_json::from_str(&new_config)
-            .map_err(|e| format!("Failed to parse new config: {}", e))?;
-        let old_json: serde_json::Value = serde_json::from_str(&old_config)
-            .map_err(|e| format!("Failed to parse old config: {}", e))?;
-
-        // Merge key sections from old config (preserve gateway.auth from new config)
-        if let Some(agents) = old_json.get("agents") {
-            new_json["agents"] = agents.clone();
-        }
-        if let Some(auth) = old_json.get("auth") {
-            new_json["auth"] = auth.clone();
-        }
-        if let Some(messages) = old_json.get("messages") {
-            new_json["messages"] = messages.clone();
-        }
-        if let Some(plugins) = old_json.get("plugins") {
-            new_json["plugins"] = plugins.clone();
-        }
-        if let Some(channels) = old_json.get("channels") {
-            new_json["channels"] = channels.clone();
-        }
-
-        // Write merged config back
-        let merged = serde_json::to_string_pretty(&new_json)
-            .map_err(|e| format!("Failed to serialize merged config: {}", e))?;
-        fs::write(&config_path, merged).map_err(|e| e.to_string())?;
-    }
-
-    // Start the gateway (runs natively on macOS, not via Docker)
-    let start_output = shell_command("openclaw gateway start")?;
-
-    // Check for errors in start output
-    if start_output.to_lowercase().contains("error") || start_output.to_lowercase().contains("failed") {
-        return Err(format!("Gateway start may have failed: {}", start_output));
-    }
-
-    // Give it time to initialize - native process startup
-    thread::sleep(Duration::from_secs(5));
-
-    // Try to verify it's actually accessible via network with multiple attempts
-    let mut last_error = String::new();
-    for attempt in 1..=8 {
-        // Try to connect to the gateway port (18789)
-        if TcpStream::connect("127.0.0.1:18789").is_ok() {
-            // Port is open, gateway is listening!
-            return Ok("Gateway started successfully and is accessible on port 18789.".to_string());
-        }
-
-        // Check status output for diagnostic info
-        if let Ok(status) = shell_command("openclaw gateway status") {
-            let status_lower = status.to_lowercase();
-            last_error = format!("Status: {} | Port 18789: not accessible", status.trim());
-
-            // If status indicates it's running but port isn't open yet, keep waiting
-            if status_lower.contains("starting") || status_lower.contains("initializing") {
-                last_error = format!("Gateway is starting... (attempt {}/8)", attempt);
-            }
-        } else {
-            last_error = format!("Gateway status check failed (attempt {}/8)", attempt);
-        }
-
-        if attempt < 8 {
-            thread::sleep(Duration::from_secs(3));
-        }
-    }
-
-    // Get final status for error message
-    let final_status = shell_command("openclaw gateway status")
-        .unwrap_or_else(|_| "Unable to get status".to_string());
-
-    Err(format!(
-        "Gateway did not become accessible on port 18789 after 24+ seconds.\n\
-        Last status: {}\n\
-        Final gateway status:\n{}\n\n\
-        Troubleshooting:\n\
-        1. Check gateway logs: 'openclaw gateway logs'\n\
-        2. Check gateway status: 'openclaw gateway status'\n\
-        3. Try manual start: 'openclaw gateway stop && openclaw gateway start'\n\
-        4. Check if port 18789 is in use: 'lsof -i :18789'",
-        last_error,
-        final_status
-    ))
+    Ok("Configuration completed.".into())
 }
 
 #[command]
-fn generate_pairing_code() -> Result<String, String> {
-    // Give gateway a bit more time if needed
-    thread::sleep(Duration::from_secs(2));
-
-    // Try to verify gateway is accessible (but don't fail if we can't verify)
-    let _ = shell_command("openclaw gateway status");
-
-    // OpenClaw doesn't have a "pairing create" command.
-    // The flow is: user sends a message to the bot, then checks pending requests.
-    // Return instructions for the user.
-    Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically with a code.".to_string())
-}
-
-#[command]
-fn approve_pairing(code: String) -> Result<String, String> {
-    // Run: openclaw pairing approve <code> --channel telegram
-    let output = shell_command(&format!("openclaw pairing approve {} --channel telegram", code));
+fn start_gateway_service() -> Result<String, String> {
+    // 1. Install gateway service
+    shell_command("openclaw gateway install --force")?;
     
-    match output {
-        Ok(out) => {
-            let out_lower = out.to_lowercase();
-            if out_lower.contains("error") {
-                if out_lower.contains("no pending pairing request found") {
-                    return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
-                }
-                return Err(out);
-            }
-            Ok("Pairing successful!".to_string())
-        },
-        Err(err) => {
-            let err_lower = err.to_lowercase();
-            if err_lower.contains("no pending pairing request found") {
-                return Err("Invalid pairing code. Please make sure you sent a message to the bot and try again.".to_string());
-            }
-            Err(err)
-        }
-    }
+    // 2. Start gateway service
+    shell_command("openclaw gateway start")?;
+    
+    // 3. Verify status
+    let status = shell_command("openclaw gateway status")?;
+    Ok(status)
 }
 
 #[command]
-fn get_dashboard_url() -> Result<String, String> {
+fn get_openclaw_config() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let config_path = home.join(".openclaw").join("openclaw.json");
-
-    let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let json: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
-
-    let token = json.get("gateway")
-        .and_then(|g| g.get("auth"))
-        .and_then(|a| a.get("token"))
-        .and_then(|t| t.as_str())
-        .ok_or("Could not find gateway token in config")?;
-
-    Ok(format!("http://127.0.0.1:18789/?token={}", token))
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    Ok(json)
 }
 
-// Helper to run shell commands with proper PATH (fixes macOS Tauri PATH issue)
+#[command]
+fn save_openclaw_config(config: serde_json::Value) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(config_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[command]
+fn get_workspace_files() -> Result<Vec<WorkspaceFile>, String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let workspace = home.join(".openclaw").join("workspace");
+    if !workspace.exists() {
+        return Ok(vec![]);
+    }
+    let mut files = vec![];
+    if let Ok(entries) = fs::read_dir(workspace) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                files.push(WorkspaceFile { name, content });
+            }
+        }
+    }
+    Ok(files)
+}
+
+#[command]
+fn save_workspace_file(name: String, content: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let workspace = home.join(".openclaw").join("workspace");
+    fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    let path = workspace.join(name);
+    fs::write(path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[command]
+fn get_gateway_status() -> Result<String, String> {
+    shell_command("openclaw gateway status")
+}
+
+#[command]
+fn control_gateway(action: String) -> Result<String, String> {
+    let cmd = format!("openclaw gateway {}", action);
+    shell_command(&cmd)
+}
+
+#[command]
+fn stream_logs(window: Window) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let log_path = home.join(".openclaw").join("logs").join("gateway.log");
+    
+    if !log_path.exists() {
+        fs::create_dir_all(log_path.parent().unwrap()).ok();
+        fs::write(&log_path, "").ok();
+    }
+
+    thread::spawn(move || {
+        if let Ok(file) = fs::File::open(&log_path) {
+            let mut reader = BufReader::new(file);
+            use std::io::Seek;
+            let _ = reader.seek(std::io::SeekFrom::End(0));
+
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => thread::sleep(Duration::from_millis(500)),
+                    Ok(_) => { let _ = window.emit("log-event", line); },
+                    Err(_) => break,
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[command]
+fn run_openclaw_command(command: String) -> Result<String, String> {
+    shell_command(&command)
+}
+
 fn shell_command(cmd: &str) -> Result<String, String> {
-    // On macOS, GUI apps don't inherit the shell's PATH.
-    // We source common profile files and manually add common paths.
-    // We redirect ALL preamble output to /dev/null.
+    // Enhanced PATH and sourcing for macOS
     let full_cmd = format!(
-        "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
+        "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin:$HOME/.nvm/versions/node/$(nvm current 2>/dev/null || echo 'v22.18.0')/bin\"; \
          {{ [ -f /etc/profile ] && . /etc/profile; \
            [ -f ~/.zprofile ] && . ~/.zprofile; \
-           [ -f ~/.zshrc ] && . ~/.zshrc; }} > /dev/null 2>&1; \
+           [ -f ~/.zshrc ] && . ~/.zshrc; \
+           [ -s \"$HOME/.nvm/nvm.sh\" ] && . \"$HOME/.nvm/nvm.sh\"; }} > /dev/null 2>&1; \
          {}", 
         cmd
     );
@@ -392,9 +264,8 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     if output.status.success() {
         Ok(stdout)
     } else {
-        // Strip common shell preamble errors from stderr if they somehow leaked
         let cleaned_stderr = stderr.lines()
-            .filter(|line| !line.contains(".zshrc") && !line.contains(".zprofile") && !line.contains("no such file or directory"))
+            .filter(|line| !line.contains(".zshrc") && !line.contains(".zprofile") && !line.contains("no such file or directory") && !line.contains("nvm"))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -407,7 +278,6 @@ fn shell_command(cmd: &str) -> Result<String, String> {
         } else {
             format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1))
         };
-
         Err(err_to_return)
     }
 }
@@ -418,10 +288,15 @@ fn main() {
             check_prerequisites,
             install_openclaw,
             configure_agent,
-            start_gateway,
-            generate_pairing_code,
-            get_dashboard_url,
-            approve_pairing
+            start_gateway_service,
+            get_openclaw_config,
+            save_openclaw_config,
+            get_workspace_files,
+            save_workspace_file,
+            get_gateway_status,
+            control_gateway,
+            stream_logs,
+            run_openclaw_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -46,16 +46,22 @@
     "security": {
       "csp": null
     },
+    "systemTray": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    },
     "updater": {
       "active": false
     },
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 700,
         "resizable": true,
-        "title": "ClawSetup",
-        "width": 800
+        "title": "OpenClaw Desktop",
+        "width": 1000,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true
       }
     ]
   }
