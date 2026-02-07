@@ -1,42 +1,89 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { OpenClawConfig } from "../types";
 import "./ModelsTab.css";
 
-const AVAILABLE_MODELS = [
-    "anthropic/claude-3-5-sonnet-20241022",
-    "anthropic/claude-3-opus-20240229",
-    "anthropic/claude-3-haiku-20240307",
-    "openai/gpt-4o",
-    "openai/gpt-4-turbo",
-    "openai/gpt-3.5-turbo",
-    "ollama/llama3",
-    "ollama/mistral"
-];
+import { SUPPORTED_PROVIDERS, FLATTENED_MODELS, AuthModeDefinition, ProviderDefinition } from "../model-definitions";
 
 export function ModelsTab({ config }: { config: OpenClawConfig | null }) {
     const [isAddingProvider, setIsAddingProvider] = useState(false);
     const [newProvider, setNewProvider] = useState("anthropic");
+    const [newAuthMode, setNewAuthMode] = useState<string>("api_key");
     const [newApiKey, setNewApiKey] = useState("");
     const [testStatus, setTestStatus] = useState<Record<string, string>>({});
 
+    // Get the selected provider definition
+    const selectedProvider = useMemo(() =>
+        SUPPORTED_PROVIDERS.find(p => p.id === newProvider),
+        [newProvider]
+    );
+
+    // Get available auth modes for selected provider
+    const availableAuthModes = useMemo(() =>
+        selectedProvider?.authModes || [],
+        [selectedProvider]
+    );
+
+    // Reset auth mode when provider changes
+    const handleProviderChange = (providerId: string) => {
+        setNewProvider(providerId);
+        const provider = SUPPORTED_PROVIDERS.find(p => p.id === providerId);
+        if (provider?.authModes?.length) {
+            setNewAuthMode(provider.authModes[0].mode);
+        }
+        setNewApiKey("");
+    };
+
+    const selectedAuthModeDefinition = useMemo(() =>
+        availableAuthModes.find(m => m.mode === newAuthMode),
+        [availableAuthModes, newAuthMode]
+    );
+
     const handleAddProvider = async () => {
-        if (!config || !newApiKey) return;
+        if (!config) return;
         const newConfig = { ...config };
         const profileName = `${newProvider}:custom`;
 
         newConfig.auth = newConfig.auth || {};
         newConfig.auth.profiles = newConfig.auth.profiles || {};
-        newConfig.auth.profiles[profileName] = {
-            provider: newProvider,
-            mode: "token",
-            token: newApiKey
-        } as any; // forceful cast as we're adding fields
+
+        // Store based on auth mode
+        if (newAuthMode === 'api_key' || newAuthMode === 'token') {
+            if (!newApiKey) {
+                alert("Please enter an API key or token");
+                return;
+            }
+            newConfig.auth.profiles[profileName] = {
+                provider: newProvider,
+                mode: newAuthMode === 'api_key' ? 'api_key' : 'token',
+                ...(newAuthMode === 'api_key' ? { key: newApiKey } : { token: newApiKey })
+            } as any;
+        } else if (newAuthMode === 'oauth' || newAuthMode === 'cli_sync') {
+            // For OAuth/CLI modes, we just store the profile config
+            // The actual authentication happens via openclaw CLI
+            newConfig.auth.profiles[profileName] = {
+                provider: newProvider,
+                mode: 'oauth'
+            } as any;
+        } else if (newAuthMode === 'aws_sdk') {
+            // AWS SDK uses environment credentials
+            newConfig.auth.profiles[profileName] = {
+                provider: newProvider,
+                mode: 'api_key' // Stored as api_key but resolved via AWS SDK
+            } as any;
+        }
 
         await invoke("save_openclaw_config", { config: newConfig });
         setIsAddingProvider(false);
         setNewApiKey("");
-        alert("Provider added!");
+
+        if (selectedAuthModeDefinition?.browserAuth) {
+            alert(`Provider profile saved! Run 'openclaw auth ${newProvider}' to complete browser authentication.`);
+        } else if (newAuthMode === 'cli_sync') {
+            alert(`Provider profile saved! Run '${selectedAuthModeDefinition?.cliTool} auth' to sync credentials.`);
+        } else {
+            alert("Provider added!");
+        }
     };
 
     const handleDeleteProvider = async (profileName: string) => {
@@ -75,7 +122,11 @@ export function ModelsTab({ config }: { config: OpenClawConfig | null }) {
                             value={config?.agents?.defaults?.model?.primary || ""}
                             onChange={(e) => handleModelChange(e.target.value)}
                         >
-                            {AVAILABLE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                            {FLATTENED_MODELS.map(m => (
+                                <option key={m.id} value={m.id}>
+                                    {m.name} ({m.provider})
+                                </option>
+                            ))}
                         </select>
                         <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-secondary)" }}>
                             The primary model used by default for all agents.
@@ -100,22 +151,82 @@ export function ModelsTab({ config }: { config: OpenClawConfig | null }) {
                         <div className="add-profile-form">
                             <div className="form-group">
                                 <label>Provider</label>
-                                <select className="form-select" value={newProvider} onChange={e => setNewProvider(e.target.value)}>
-                                    <option value="anthropic">Anthropic</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="ollama">Ollama</option>
+                                <select className="form-select" value={newProvider} onChange={e => handleProviderChange(e.target.value)}>
+                                    {SUPPORTED_PROVIDERS.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
                                 </select>
                             </div>
-                            <div className="form-group">
-                                <label>API Key (or Host for Ollama)</label>
-                                <input
-                                    className="form-input"
-                                    type="password"
-                                    placeholder="sk-..."
-                                    value={newApiKey}
-                                    onChange={e => setNewApiKey(e.target.value)}
-                                />
-                            </div>
+
+                            {availableAuthModes.length > 0 && (
+                                <div className="form-group">
+                                    <label>Authentication Method</label>
+                                    <select className="form-select" value={newAuthMode} onChange={e => setNewAuthMode(e.target.value)}>
+                                        {availableAuthModes.map(m => (
+                                            <option key={m.mode} value={m.mode}>{m.name}</option>
+                                        ))}
+                                    </select>
+                                    {selectedAuthModeDefinition && (
+                                        <p style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                                            {selectedAuthModeDefinition.description}
+                                            {selectedAuthModeDefinition.envVar && (
+                                                <><br />Environment variable: <code>{selectedAuthModeDefinition.envVar}</code></>
+                                            )}
+                                            {selectedAuthModeDefinition.browserAuth && (
+                                                <><br />⚠️ This will open a browser for authentication</>
+                                            )}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {(newAuthMode === 'api_key' || newAuthMode === 'token') && (
+                                <div className="form-group">
+                                    <label>{newAuthMode === 'api_key' ? 'API Key' : 'Access Token'}</label>
+                                    <input
+                                        className="form-input"
+                                        type="password"
+                                        placeholder={selectedAuthModeDefinition?.envVar ? `e.g., ${selectedAuthModeDefinition.envVar}` : "sk-..."}
+                                        value={newApiKey}
+                                        onChange={e => setNewApiKey(e.target.value)}
+                                    />
+                                </div>
+                            )}
+
+                            {(newAuthMode === 'oauth' || newAuthMode === 'cli_sync') && (
+                                <div className="form-group">
+                                    <div style={{ padding: "12px", background: "var(--bg-secondary)", borderRadius: "8px", fontSize: "13px" }}>
+                                        {newAuthMode === 'oauth' ? (
+                                            <>
+                                                <strong>Browser Authentication</strong>
+                                                <p style={{ margin: "8px 0 0 0", color: "var(--text-secondary)" }}>
+                                                    After saving, run <code>openclaw auth {newProvider}</code> in your terminal to complete authentication.
+                                                </p>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <strong>CLI Credential Sync</strong>
+                                                <p style={{ margin: "8px 0 0 0", color: "var(--text-secondary)" }}>
+                                                    OpenClaw will sync credentials from <code>{selectedAuthModeDefinition?.cliTool}</code>.
+                                                    Make sure you're already authenticated with that tool.
+                                                </p>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {newAuthMode === 'aws_sdk' && (
+                                <div className="form-group">
+                                    <div style={{ padding: "12px", background: "var(--bg-secondary)", borderRadius: "8px", fontSize: "13px" }}>
+                                        <strong>AWS SDK Authentication</strong>
+                                        <p style={{ margin: "8px 0 0 0", color: "var(--text-secondary)" }}>
+                                            Uses AWS SDK credential chain: <code>AWS_ACCESS_KEY_ID</code>, <code>AWS_PROFILE</code>, or IAM role.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
                             <button className="primary-btn" onClick={handleAddProvider}>Save Profile</button>
                         </div>
                     )}
