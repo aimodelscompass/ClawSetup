@@ -122,7 +122,14 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     // Build profile name (e.g., "anthropic:default")
     let profile_name = format!("{}:default", config.provider);
-    let auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
+    let mut auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
+
+    // Map specialized auth flows to standard OpenClaw modes for the config files
+    if auth_mode == "setup-token" {
+        auth_mode = "token".to_string();
+    } else if auth_mode == "antigravity" || auth_mode == "gemini_cli" || auth_mode == "codex" {
+        auth_mode = "oauth".to_string();
+    }
 
     // Handle Telegram config section
     let telegram_section = if let Some(ref token) = config.telegram_token {
