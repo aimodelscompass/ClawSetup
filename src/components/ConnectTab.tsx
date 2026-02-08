@@ -12,6 +12,20 @@ const AVAILABLE_SKILLS = [
 
 export function ConnectTab({ config }: { config: OpenClawConfig | null }) {
     const [telegramToken, setTelegramToken] = useState(config?.plugins?.entries?.telegram?.token || "");
+    const [pairingCode, setPairingCode] = useState("");
+    const [pairingStatus, setPairingStatus] = useState("");
+
+    const handlePairing = async () => {
+        if (!pairingCode) return;
+        setPairingStatus("Verifying...");
+        try {
+            await invoke("approve_pairing", { code: pairingCode });
+            setPairingStatus("✅ Pairing successful!");
+            setPairingCode("");
+        } catch (e: any) {
+            setPairingStatus("❌ " + e);
+        }
+    };
 
     const handleSkillToggle = async (skillKey: string, enabled: boolean) => {
         if (!config) return;
@@ -85,6 +99,35 @@ export function ConnectTab({ config }: { config: OpenClawConfig | null }) {
                                     <button className="primary-btn" onClick={handleSaveTelegram}>Save</button>
                                 </div>
                             </div>
+
+                            {config?.plugins?.entries?.telegram?.enabled && (
+                                <div className="pairing-section" style={{ marginTop: "15px", padding: "15px", background: "rgba(0,0,0,0.2)", borderRadius: "8px" }}>
+                                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>Pairing</div>
+                                    <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "10px" }}>
+                                        Message your bot on Telegram to get a pairing code, then enter it here.
+                                    </p>
+                                    <div style={{ display: "flex", gap: "10px" }}>
+                                        <input
+                                            className="form-input"
+                                            placeholder="Enter pending code (e.g. 8X92...)"
+                                            value={pairingCode}
+                                            onChange={(e) => setPairingCode(e.target.value)}
+                                        />
+                                        <button
+                                            className="primary-btn"
+                                            onClick={handlePairing}
+                                            disabled={!pairingCode || pairingStatus === "Verifying..."}
+                                        >
+                                            {pairingStatus === "Verifying..." ? "Verifying..." : "Verify"}
+                                        </button>
+                                    </div>
+                                    {pairingStatus && pairingStatus !== "Verifying..." && (
+                                        <div style={{ marginTop: "8px", fontSize: "12px", color: pairingStatus.includes("success") ? "#4caf50" : "#f44336" }}>
+                                            {pairingStatus}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         <div className="channel-item" style={{ opacity: 0.7 }}>

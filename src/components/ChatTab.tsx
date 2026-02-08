@@ -1,12 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Dispatch, SetStateAction } from "react";
 import { GatewayClient } from "../GatewayClient";
 import { open } from "@tauri-apps/api/dialog";
 import "./ChatTab.css";
 
-export function ChatTab({ client }: { client: GatewayClient | null }) {
+interface ChatTabProps {
+    client: GatewayClient | null;
+    messages: any[];
+    setMessages: Dispatch<SetStateAction<any[]>>;
+    streamingMessage: string;
+    setStreamingMessage: Dispatch<SetStateAction<string>>;
+}
+
+export function ChatTab({ client, messages, setMessages, streamingMessage, setStreamingMessage }: ChatTabProps) {
     const [input, setInput] = useState("");
-    const [messages, setMessages] = useState<any[]>([]);
-    const [streamingMessage, setStreamingMessage] = useState("");
     const [attachments, setAttachments] = useState<string[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +52,7 @@ export function ChatTab({ client }: { client: GatewayClient | null }) {
             await client.request("chat.send", {
                 message: input,
                 attachments: userMsg.attachments,
-                sessionKey: "desktop-session",
+                sessionKey: "desktop-session-" + new Date().toISOString().split('T')[0],
                 idempotencyKey: crypto.randomUUID()
             });
         } catch (e: any) {
