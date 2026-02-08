@@ -17,9 +17,9 @@ function App() {
   const [agentName, setAgentName] = useState("");
   const [agentVibe, setAgentVibe] = useState("Professional");
   const [apiKey, setApiKey] = useState("");
-  const [authMethod, setAuthMethod] = useState("token"); // "token", "session", "oauth"
+  const [authMethod, setAuthMethod] = useState("token"); 
   const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("anthropic/claude-haiku-4-5-20251001");
+  const [model, setModel] = useState("anthropic/claude-3-5-sonnet-20241022");
   const [telegramToken, setTelegramToken] = useState("");
   const [progress, setProgress] = useState("");
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
@@ -58,13 +58,35 @@ function App() {
     { id: "coding-agent", name: "Coding Agent", desc: "Run Codex, Claude Code, etc." }
   ];
 
+  const stepsList = [
+    { id: 1, name: "System Check" },
+    { id: 2, name: "Security" },
+    { id: 3, name: "Mode" },
+    { id: 4, name: "Identity" },
+    { id: 5, name: "Agent" },
+    { id: 6, name: "Gateway", advanced: true },
+    { id: 7, name: "Brain" },
+    { id: 8, name: "Channels" },
+    { id: 9, name: "Runtime", advanced: true },
+    { id: 10, name: "Skills", advanced: true },
+    { id: 11, name: "Pairing" }
+  ];
+
   useEffect(() => { checkSystem(); }, []);
+
+  // Update default auth method when provider changes
+  useEffect(() => {
+    if (provider === "anthropic") setAuthMethod("token");
+    else if (provider === "google") setAuthMethod("token");
+    else if (provider === "openai") setAuthMethod("token");
+    else setAuthMethod("token");
+  }, [provider]);
 
   async function checkSystem() {
     const res: any = await invoke("check_prerequisites");
     setChecks({
       node: res.node_installed,
-      docker: res.docker_running, // Keep for backward compat but not displayed
+      docker: res.docker_running,
       openclaw: res.openclaw_installed
     });
   }
@@ -117,16 +139,14 @@ function App() {
       await invoke("start_gateway");
 
       setProgress("Finalizing setup...");
-      // Just getting instruction text now
       const instruction: string = await invoke("generate_pairing_code");
-      setPairingCode(instruction); // "Ready! Send any message..."
+      setPairingCode(instruction);
 
-      // Get authenticated URL
       const url: string = await invoke("get_dashboard_url");
       setDashboardUrl(url);
 
       setProgress("");
-      setStep(11); // Go to pairing
+      setStep(11);
     } catch (e) {
       setProgress("");
       setLogs("Error: " + e);
@@ -153,375 +173,515 @@ function App() {
     );
   };
 
-  return (
-    <div className="container">
-      <h1>🦞 ClawSetup</h1>
+  const getStepStatus = (stepId: number) => {
+    if (step === stepId) return "active";
+    if (step > stepId) return "completed";
+    return "";
+  };
 
-      {step === 1 && (
-        <div className="step">
-          <h2>1. System Check</h2>
-          <div className="check-item">Node.js: {checks.node ? "✅" : "❌"}</div>
-          <div className="check-item">OpenClaw: {checks.openclaw ? "✅ Installed" : "⏳ Will install"}</div>
-          <button disabled={!checks.node} onClick={() => setStep(2)}>Next: Security</button>
-        </div>
-      )}
+  const isOAuthMethod = (method: string) => {
+    return ["antigravity", "gemini_cli", "codex"].includes(method);
+  };
 
-      {step === 2 && (
-        <div className="step">
-          <h2>2. Security Warning</h2>
-          <div className="security-box">
-            <p>OpenClaw is a hobby project and still in beta. Expect sharp edges.</p>
-            <p>This bot can read files and run actions if tools are enabled. A bad prompt can trick it into doing unsafe things.</p>
-            <p>Recommended baseline: Pairing/allowlists, Sandbox, Keep secrets out of reach.</p>
-            <p><strong>I understand this is powerful and inherently risky. Continue?</strong></p>
-          </div>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => setStep(3)}>Yes, I understand</button>
-            <button className="secondary" onClick={() => setStep(1)}>No, take me back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 3 && (
-        <div className="step">
-          <h2>3. Onboarding Mode</h2>
-          <p>Choose how you want to configure OpenClaw.</p>
-          <div className="mode-options">
-            <div className={`mode-option ${mode === "basic" ? "selected" : ""}`} onClick={() => setMode("basic")}>
-              <h3>QuickStart</h3>
-              <p>Configure details later. Best for most users.</p>
+  const renderStep = () => {
+    switch (step) {
+      case 1:
+        return (
+          <div className="step-view">
+            <h2>System Check</h2>
+            <p className="step-description">We need to make sure your system is ready for OpenClaw.</p>
+            <div className="check-item">
+              <span className="check-status">{checks.node ? "✅" : "❌"}</span>
+              Node.js {checks.node ? "detected" : "not found"}
             </div>
-            <div className={`mode-option ${mode === "advanced" ? "selected" : ""}`} onClick={() => setMode("advanced")}>
-              <h3>Manual (Advanced)</h3>
-              <p>Configure gateway, auth, and skills now.</p>
+            <div className="check-item">
+              <span className="check-status">{checks.openclaw ? "✅" : "⏳"}</span>
+              OpenClaw {checks.openclaw ? "Installed" : "Ready to install"}
+            </div>
+            {!checks.node && (
+              <p className="error" style={{marginTop: "1rem", color: "var(--error)"}}>
+                Please install Node.js (v18+) to continue.
+              </p>
+            )}
+            <div className="button-group">
+              <button className="primary" disabled={!checks.node} onClick={() => setStep(2)}>Continue</button>
             </div>
           </div>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => setStep(4)}>Continue</button>
-            <button className="secondary" onClick={() => setStep(2)}>Back</button>
+        );
+      case 2:
+        return (
+          <div className="step-view">
+            <h2>Security Baseline</h2>
+            <p className="step-description">Please read this carefully before proceeding.</p>
+            <div className="security-alert">
+              <p>OpenClaw is a powerful agent system that can execute code and manage files.</p>
+              <p>A malicious prompt could potentially trick the agent into performing unsafe actions. We recommend running it in a sandboxed environment if possible.</p>
+              <p>Keep your API keys secure and never share your gateway token.</p>
+            </div>
+            <p style={{fontWeight: 600}}>Do you understand the risks and wish to continue?</p>
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(3)}>I Understand</button>
+              <button className="secondary" onClick={() => setStep(1)}>Back</button>
+            </div>
           </div>
-        </div>
-      )}
-
-      {step === 4 && (
-        <div className="step">
-          <h2>4. Who are you?</h2>
-          <input placeholder="David" value={userName} onChange={(e) => setUserName(e.target.value)} />
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button disabled={!userName} onClick={() => setStep(5)}>Next</button>
-            <button className="secondary" onClick={() => setStep(3)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 5 && (
-        <div className="step">
-          <h2>5. Create your Agent</h2>
-          <label>Name</label>
-          <input placeholder="Jeeves" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
-          <label>Vibe</label>
-          <select value={agentVibe} onChange={(e) => setAgentVibe(e.target.value)}>
-            <option>Professional</option><option>Friendly</option><option>Chaos</option>
-          </select>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button disabled={!agentName} onClick={() => setStep(mode === "advanced" ? 6 : 7)}>Next</button>
-            <button className="secondary" onClick={() => setStep(4)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 6 && (
-        <div className="step">
-          <h2>6. Gateway Settings</h2>
-          <label>Port</label>
-          <input type="number" value={gatewayPort} onChange={(e) => setGatewayPort(parseInt(e.target.value))} />
-          <label>Bind</label>
-          <select value={gatewayBind} onChange={(e) => setGatewayBind(e.target.value)}>
-            <option value="loopback">Loopback (127.0.0.1)</option>
-            <option value="all">All Interfaces (0.0.0.0)</option>
-          </select>
-          <label>Auth Mode</label>
-          <select value={gatewayAuthMode} onChange={(e) => setGatewayAuthMode(e.target.value)}>
-            <option value="token">Token (Secure)</option>
-            <option value="none">None (Insecure)</option>
-          </select>
-          <label>Tailscale</label>
-          <select value={tailscaleMode} onChange={(e) => setTailscaleMode(e.target.value)}>
-            <option value="off">Off</option>
-            <option value="on">On (Expose via Tailscale)</option>
-          </select>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => setStep(7)}>Next: Brain</button>
-            <button className="secondary" onClick={() => setStep(5)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 7 && (
-        <div className="step">
-          <h2>7. Connect Brain</h2>
-          <label>Provider</label>
-          <select value={provider} onChange={(e) => {
-            setProvider(e.target.value);
-            setAuthMethod("token");
-          }}>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-            <option value="google">Google</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="ollama">Ollama (Local)</option>
-            {mode === "advanced" && (
-              <>
-                <option value="minimax">MiniMax</option>
-                <option value="moonshot">Moonshot AI (Kimi)</option>
-                <option value="xai">xAI (Grok)</option>
-                <option value="qwen">Qwen</option>
-                <option value="z_ai">Z.AI (GLM 4.7)</option>
-                <option value="qianfan">Qianfan</option>
-                <option value="copilot">Copilot</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="venice">Venice AI</option>
-              </>
-            )}
-          </select>
-          
-          <label>Authentication Method</label>
-          <select value={authMethod} onChange={(e) => setAuthMethod(e.target.value)}>
-            <option value="token">API Key (Standard)</option>
-            {(provider === "anthropic" || provider === "openai") && (
-              <option value="session">Session Cookie (Unofficial)</option>
-            )}
-            {provider === "google" && (
-              <option value="oauth">Google Auth (Browser)</option>
-            )}
-          </select>
-
-          <label>Model</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <optgroup label="Anthropic">
-              <option value="anthropic/claude-opus-4-6">Claude Opus 4.6</option>
-              <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5</option>
-              <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-              <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-              <option value="anthropic/claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-            </optgroup>
-            <optgroup label="OpenAI">
-              <option value="openai/gpt-4o">GPT-4o</option>
-              <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-            </optgroup>
-            <optgroup label="Google">
-              <option value="google/gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
-              <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-            </optgroup>
-          </select>
-
-          {authMethod !== "oauth" && (
-            <>
-              <label>{authMethod === "session" ? "Session Cookie" : "API Key"}</label>
-              <input 
-                type="password" 
-                placeholder="Paste here..." 
-                value={apiKey} 
-                onChange={(e) => setApiKey(e.target.value)} 
-              />
-            </>
-          )}
-
-          {authMethod === "oauth" && (
-            <button onClick={async () => {
-              setLoading(true);
-              try {
-                const res: string = await invoke("start_provider_auth", { provider, method: "oauth" });
-                setApiKey(res);
-              } catch (e) { setLogs("Auth Error: " + e); }
-              setLoading(false);
-            }}>Start Browser Login</button>
-          )}
-
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button disabled={authMethod !== "oauth" && !apiKey} onClick={() => setStep(8)}>Next: Channels</button>
-            <button className="secondary" onClick={() => setStep(mode === "advanced" ? 6 : 5)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 7.5 was here, removed */}
-
-      {step === 8 && (
-        <div className="step">
-          <h2>8. Connect Channels</h2>
-          <p>Telegram is recommended for QuickStart.</p>
-          <label>Telegram Token</label>
-          <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
-          
-          {mode === "advanced" && (
-            <p style={{fontSize: "0.8rem", color: "#666", marginTop: "10px"}}>
-              More channels (Discord, Slack, WhatsApp) can be configured after setup in the dashboard.
-            </p>
-          )}
-
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => {
-              if (mode === "advanced") setStep(9);
-              else handleInstall();
-            }} disabled={loading}>
-              {mode === "advanced" ? "Next: Environment" : (loading ? "Installing..." : "Finish Setup")}
-            </button>
-            <button className="secondary" onClick={() => setStep(7)} disabled={loading}>Back</button>
-          </div>
-          
-          {mode !== "advanced" && progress && <div style={{ marginTop: "10px", color: "#0084ff", fontWeight: "bold" }}>{progress}</div>}
-          {mode !== "advanced" && <pre style={{maxHeight: "150px", overflow: "auto"}}>{logs}</pre>}
-          {mode !== "advanced" && error && (
-            <button className="error-btn" onClick={() => invoke("close_app")} style={{marginTop: "10px", backgroundColor: "#ff4d4d"}}>Exit Installation</button>
-          )}
-        </div>
-      )}
-
-      {step === 9 && (
-        <div className="step">
-          <h2>9. Node Manager</h2>
-          <p>OpenClaw uses Node.js for skill execution.</p>
-          <label>Preferred Node Manager</label>
-          <select value={nodeManager} onChange={(e) => setNodeManager(e.target.value)}>
-            <option value="npm">npm</option>
-            <option value="pnpm">pnpm</option>
-            <option value="bun">bun</option>
-          </select>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => setStep(10)}>Next: Skills</button>
-            <button className="secondary" onClick={() => setStep(8)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 10 && (
-        <div className="step">
-          <h2>10. Select Skills</h2>
-          <p>Enable the tools your agent can use.</p>
-          <div className="skills-grid">
-            {availableSkills.map(skill => (
-              <div 
-                key={skill.id} 
-                className={`skill-item ${selectedSkills.includes(skill.id) ? "selected" : ""}`}
-                onClick={() => toggleSkill(skill.id)}
-              >
-                <div className="skill-name">{skill.name}</div>
-                <div className="skill-desc">{skill.desc}</div>
+        );
+      case 3:
+        return (
+          <div className="step-view">
+            <h2>Configuration Mode</h2>
+            <p className="step-description">Choose how much control you want over the initial setup.</p>
+            <div className="mode-card-container">
+              <div className={`mode-card ${mode === "basic" ? "active" : ""}`} onClick={() => setMode("basic")}>
+                <h3>QuickStart</h3>
+                <p>Fastest setup with sane defaults. Recommended for first-time users.</p>
               </div>
-            ))}
-          </div>
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button onClick={() => {
-              setCurrentServiceIdx(0);
-              setIsConfiguringService(null);
-              setStep(10.5);
-            }}>Next: Service Keys</button>
-            <button className="secondary" onClick={() => setStep(9)}>Back</button>
-          </div>
-        </div>
-      )}
-
-      {step === 10.5 && (
-        <div className="step">
-          <h2>10.5 Service API Keys: {servicesToConfigure[currentServiceIdx].name}</h2>
-          <p>Would you like to set the API key for {servicesToConfigure[currentServiceIdx].name}?</p>
-          
-          <div style={{display: "flex", gap: "10px", justifyContent: "center", marginBottom: "20px"}}>
-            <button 
-              className={isConfiguringService === true ? "selected" : "secondary"}
-              onClick={() => setIsConfiguringService(true)}
-            >Yes</button>
-            <button 
-              className={isConfiguringService === false ? "selected" : "secondary"}
-              onClick={() => {
-                setIsConfiguringService(false);
-              }}
-            >No</button>
-          </div>
-
-          {isConfiguringService === true && (
-            <div className="service-auth-box" style={{textAlign: "left", background: "#fff", padding: "15px", borderRadius: "8px", border: "1px solid #ddd"}}>
-              <label>{servicesToConfigure[currentServiceIdx].name} Key</label>
-              <input 
-                type="password" 
-                placeholder={servicesToConfigure[currentServiceIdx].placeholder} 
-                value={serviceKeys[servicesToConfigure[currentServiceIdx].id] || ""} 
-                onChange={(e) => setServiceKeys({...serviceKeys, [servicesToConfigure[currentServiceIdx].id]: e.target.value})} 
-              />
+              <div className={`mode-card ${mode === "advanced" ? "active" : ""}`} onClick={() => setMode("advanced")}>
+                <h3>Advanced</h3>
+                <p>Full control over gateway, networking, and pre-installed skills.</p>
+              </div>
             </div>
-          )}
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(4)}>Continue</button>
+              <button className="secondary" onClick={() => setStep(2)}>Back</button>
+            </div>
+          </div>
+        );
+      case 4:
+        return (
+          <div className="step-view">
+            <h2>Your Identity</h2>
+            <p className="step-description">What should the agent call you?</p>
+            <div className="form-group">
+              <label>Your Name</label>
+              <input autoFocus placeholder="e.g. David" value={userName} onChange={(e) => setUserName(e.target.value)} />
+            </div>
+            <div className="button-group">
+              <button className="primary" disabled={!userName} onClick={() => setStep(5)}>Next</button>
+              <button className="secondary" onClick={() => setStep(3)}>Back</button>
+            </div>
+          </div>
+        );
+      case 5:
+        return (
+          <div className="step-view">
+            <h2>Agent Profile</h2>
+            <p className="step-description">Give your agent a name and a personality.</p>
+            <div className="form-group">
+              <label>Agent Name</label>
+              <input autoFocus placeholder="e.g. Jeeves" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Agent Vibe</label>
+              <select value={agentVibe} onChange={(e) => setAgentVibe(e.target.value)}>
+                <option>Professional</option>
+                <option>Friendly</option>
+                <option>Chaos</option>
+                <option>Helpful Assistant</option>
+              </select>
+            </div>
+            <div className="button-group">
+              <button className="primary" disabled={!agentName} onClick={() => setStep(mode === "advanced" ? 6 : 7)}>Next</button>
+              <button className="secondary" onClick={() => setStep(4)}>Back</button>
+            </div>
+          </div>
+        );
+      case 6:
+        return (
+          <div className="step-view">
+            <h2>Gateway Settings</h2>
+            <p className="step-description">Configure the network bridge for your agent.</p>
+            <div className="form-group">
+              <label>Port</label>
+              <input type="number" value={gatewayPort} onChange={(e) => setGatewayPort(parseInt(e.target.value))} />
+            </div>
+            <div className="form-group">
+              <label>Bind Address</label>
+              <select value={gatewayBind} onChange={(e) => setGatewayBind(e.target.value)}>
+                <option value="loopback">Loopback (127.0.0.1)</option>
+                <option value="all">All Interfaces (0.0.0.0)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Auth Mode</label>
+              <select value={gatewayAuthMode} onChange={(e) => setGatewayAuthMode(e.target.value)}>
+                <option value="token">Token (Secure)</option>
+                <option value="none">None (Insecure)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Tailscale</label>
+              <select value={tailscaleMode} onChange={(e) => setTailscaleMode(e.target.value)}>
+                <option value="off">Disabled</option>
+                <option value="on">Enabled (Expose via Tailscale)</option>
+              </select>
+            </div>
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(7)}>Continue</button>
+              <button className="secondary" onClick={() => setStep(5)}>Back</button>
+            </div>
+          </div>
+        );
+      case 7:
+        return (
+          <div className="step-view">
+            <h2>Connect Brain</h2>
+            <p className="step-description">Select your AI provider and authentication method.</p>
+            <div className="form-group">
+              <label>AI Provider</label>
+              <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="google">Google Gemini</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="ollama">Ollama (Local)</option>
+                {mode === "advanced" && (
+                  <>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="xai">xAI (Grok)</option>
+                    <option value="copilot">Copilot</option>
+                  </>
+                )}
+              </select>
+            </div>
+            
+            <div className="form-group">
+              <label>Auth Method</label>
+              <select value={authMethod} onChange={(e) => setAuthMethod(e.target.value)}>
+                {provider === "anthropic" && (
+                  <>
+                    <option value="token">Anthropic API Key</option>
+                    <option value="setup-token">Anthropic Token (from setup-token)</option>
+                  </>
+                )}
+                {provider === "google" && (
+                  <>
+                    <option value="token">Google Gemini API Key</option>
+                    <option value="antigravity">Google Antigravity OAuth</option>
+                    <option value="gemini_cli">Google Gemini CLI OAuth</option>
+                  </>
+                )}
+                {provider === "openai" && (
+                  <>
+                    <option value="token">OpenAI API Key</option>
+                    <option value="codex">OpenAI Codex (ChatGPT OAuth)</option>
+                  </>
+                )}
+                {provider !== "anthropic" && provider !== "google" && provider !== "openai" && (
+                   <option value="token">API Key (Standard)</option>
+                )}
+              </select>
+            </div>
 
-          <div style={{display: "flex", gap: "10px", marginTop: "20px"}}>
-            <button 
-              disabled={isConfiguringService === null || (isConfiguringService === true && !serviceKeys[servicesToConfigure[currentServiceIdx].id])} 
-              onClick={() => {
-                const sid = servicesToConfigure[currentServiceIdx].id;
-                const newKeys = { ...serviceKeys };
-                if (!isConfiguringService) {
-                  delete newKeys[sid];
-                }
-                setServiceKeys(newKeys);
+            <div className="form-group">
+              <label>Primary Model</label>
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                {provider === "anthropic" && (
+                  <optgroup label="Anthropic">
+                    <option value="anthropic/claude-opus-4-6">Claude Opus 4.6</option>
+                    <option value="anthropic/claude-opus-4-5-20260201">Claude Opus 4.5</option>
+                    <option value="anthropic/claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+                    <option value="anthropic/claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+                    <option value="anthropic/claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                  </optgroup>
+                )}
+                {provider === "openai" && (
+                  <optgroup label="OpenAI">
+                    <option value="openai/gpt-4o">GPT-4o</option>
+                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="openai/gpt-5-preview">GPT-5 Preview</option>
+                  </optgroup>
+                )}
+                {provider === "google" && (
+                  <optgroup label="Google">
+                    <option value="google/gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
+                    <option value="google/gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+                    <option value="google/gemini-ultra-2.0">Gemini Ultra 2.0</option>
+                  </optgroup>
+                )}
+                {provider === "openrouter" && (
+                   <option value="openrouter/auto">Auto (OpenRouter)</option>
+                )}
+                {provider === "ollama" && (
+                   <option value="ollama/llama3.1">Llama 3.1 (Local)</option>
+                )}
+              </select>
+            </div>
 
-                if (currentServiceIdx < servicesToConfigure.length - 1) {
-                  setCurrentServiceIdx(currentServiceIdx + 1);
-                  setIsConfiguringService(null);
+            {!isOAuthMethod(authMethod) && (
+              <div className="form-group">
+                <label>{authMethod === "setup-token" ? "Anthropic Setup Token" : "API Key"}</label>
+                <input 
+                  type="password" 
+                  placeholder="Paste here..." 
+                  value={apiKey} 
+                  onChange={(e) => setApiKey(e.target.value)} 
+                />
+                {authMethod === "setup-token" && (
+                  <p className="input-hint">
+                    Run <code>claude setup-token</code> in your terminal and paste the result here.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isOAuthMethod(authMethod) && (
+              <div style={{marginTop: "1rem"}}>
+                <button className="primary" style={{width: "100%"}} disabled={loading} onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const res: string = await invoke("start_provider_auth", { provider, method: authMethod });
+                    setApiKey(res);
+                  } catch (e) { 
+                    setLogs("Auth Error: " + e);
+                  }
+                  setLoading(false);
+                }}>
+                  {loading ? "Waiting for Browser..." : "Launch Browser Login"}
+                </button>
+                <p className="input-hint">A browser window will open to complete the authentication.</p>
+              </div>
+            )}
+
+            <div className="button-group">
+              <button className="primary" disabled={!isOAuthMethod(authMethod) && !apiKey} onClick={() => setStep(8)}>Next</button>
+              <button className="secondary" onClick={() => setStep(mode === "advanced" ? 6 : 5)}>Back</button>
+            </div>
+          </div>
+        );
+      case 8:
+        return (
+          <div className="step-view">
+            <h2>Messaging Channels</h2>
+            <p className="step-description">Connect your agent to Telegram for easy access.</p>
+            <div className="form-group">
+              <label>Telegram Bot Token</label>
+              <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
+              <p className="input-hint">Get one from @BotFather on Telegram.</p>
+            </div>
+            
+            <div className="button-group">
+              <button className="primary" onClick={() => {
+                if (mode === "advanced") setStep(9);
+                else handleInstall();
+              }} disabled={loading}>
+                {mode === "advanced" ? "Continue" : (loading ? "Installing..." : "Finish Setup")}
+              </button>
+              <button className="secondary" onClick={() => setStep(7)} disabled={loading}>Back</button>
+            </div>
+            
+            {(loading || error) && (
+              <div className="progress-container">
+                {loading && (
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{width: progress.includes("Gateway") ? "80%" : (progress.includes("skill") ? "50%" : "20%")}} />
+                  </div>
+                )}
+                <p style={{fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)"}}>{error ? "Installation Failed" : progress}</p>
+                <div className="logs-container">
+                  <pre>{logs}</pre>
+                </div>
+              </div>
+            )}
+            
+            {error && (
+              <div style={{marginTop: "2rem"}}>
+                <button className="primary" style={{backgroundColor: "var(--error)", width: "100%"}} onClick={() => invoke("close_app")}>Exit Installation</button>
+              </div>
+            )}
+          </div>
+        );
+      case 9:
+        return (
+          <div className="step-view">
+            <h2>Runtime Environment</h2>
+            <p className="step-description">Configure how the agent executes tools and skills.</p>
+            <div className="form-group">
+              <label>Node Package Manager</label>
+              <select value={nodeManager} onChange={(e) => setNodeManager(e.target.value)}>
+                <option value="npm">npm</option>
+                <option value="pnpm">pnpm</option>
+                <option value="bun">bun</option>
+              </select>
+            </div>
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(10)}>Next</button>
+              <button className="secondary" onClick={() => setStep(8)}>Back</button>
+            </div>
+          </div>
+        );
+      case 10:
+        return (
+          <div className="step-view">
+            <h2>Select Core Skills</h2>
+            <p className="step-description">Enable the capabilities your agent will start with.</p>
+            <div className="skills-grid">
+              {availableSkills.map(skill => (
+                <div 
+                  key={skill.id} 
+                  className={`skill-card ${selectedSkills.includes(skill.id) ? "active" : ""}`}
+                  onClick={() => toggleSkill(skill.id)}
+                >
+                  <div className="skill-name">{skill.name}</div>
+                  <div className="skill-desc">{skill.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="button-group">
+              <button className="primary" onClick={() => {
+                setCurrentServiceIdx(0);
+                setIsConfiguringService(null);
+                setStep(10.5);
+              }}>Continue</button>
+              <button className="secondary" onClick={() => setStep(9)}>Back</button>
+            </div>
+          </div>
+        );
+      case 10.5:
+        return (
+          <div className="step-view">
+            <h2>Service Key: {servicesToConfigure[currentServiceIdx].name}</h2>
+            <p className="step-description">Would you like to provide a key for this optional service now?</p>
+            
+            <div className="mode-card-container" style={{marginBottom: "2rem"}}>
+              <div className={`mode-card ${isConfiguringService === true ? "active" : ""}`} onClick={() => setIsConfiguringService(true)}>
+                <h3>Yes</h3>
+                <p>Configure {servicesToConfigure[currentServiceIdx].name} now.</p>
+              </div>
+              <div className={`mode-card ${isConfiguringService === false ? "active" : ""}`} onClick={() => setIsConfiguringService(false)}>
+                <h3>Skip</h3>
+                <p>I'll configure this later in the dashboard.</p>
+              </div>
+            </div>
+
+            {isConfiguringService === true && (
+              <div className="form-group animate-fadeIn">
+                <label>{servicesToConfigure[currentServiceIdx].name} API Key</label>
+                <input 
+                  type="password" 
+                  autoFocus
+                  placeholder={servicesToConfigure[currentServiceIdx].placeholder} 
+                  value={serviceKeys[servicesToConfigure[currentServiceIdx].id] || ""} 
+                  onChange={(e) => setServiceKeys({...serviceKeys, [servicesToConfigure[currentServiceIdx].id]: e.target.value})} 
+                />
+              </div>
+            )}
+
+            <div className="button-group">
+              <button 
+                className="primary"
+                disabled={isConfiguringService === null || (isConfiguringService === true && !serviceKeys[servicesToConfigure[currentServiceIdx].id])} 
+                onClick={() => {
+                  const sid = servicesToConfigure[currentServiceIdx].id;
+                  const newKeys = { ...serviceKeys };
+                  if (!isConfiguringService) delete newKeys[sid];
+                  setServiceKeys(newKeys);
+
+                  if (currentServiceIdx < servicesToConfigure.length - 1) {
+                    setCurrentServiceIdx(currentServiceIdx + 1);
+                    setIsConfiguringService(null);
+                  } else {
+                    handleInstall();
+                  }
+                }}
+              >
+                {currentServiceIdx < servicesToConfigure.length - 1 ? "Next Service" : (loading ? "Installing..." : "Finish Installation")}
+              </button>
+              <button className="secondary" onClick={() => {
+                if (currentServiceIdx > 0) {
+                  setCurrentServiceIdx(currentServiceIdx - 1);
+                  setIsConfiguringService(serviceKeys[servicesToConfigure[currentServiceIdx - 1].id] ? true : false);
                 } else {
-                  handleInstall();
+                  setStep(10);
                 }
-              }}
-            >
-              {currentServiceIdx < servicesToConfigure.length - 1 ? "Next Service" : (loading ? "Installing..." : "Finish Installation")}
-            </button>
-            <button className="secondary" onClick={() => {
-              if (currentServiceIdx > 0) {
-                setCurrentServiceIdx(currentServiceIdx - 1);
-                setIsConfiguringService(serviceKeys[servicesToConfigure[currentServiceIdx - 1].id] ? true : false);
-              } else {
-                setStep(10);
-              }
-            }} disabled={loading}>Back</button>
-          </div>
-          {progress && <div style={{ marginTop: "10px", color: "#0084ff", fontWeight: "bold" }}>{progress}</div>}
-          <pre style={{maxHeight: "150px", overflow: "auto"}}>{logs}</pre>
-          {error && (
-            <button className="error-btn" onClick={() => invoke("close_app")} style={{marginTop: "10px", backgroundColor: "#ff4d4d"}}>Exit Installation</button>
-          )}
-        </div>
-      )}
-
-      {step === 11 && (
-        <div className="step">
-          <h2>🎉 It's Alive!</h2>
-          <p>Your agent is running on <strong>{dashboardUrl}</strong></p>
-
-          <div className="pairing-box">
-             <h3>Telegram Pairing</h3>
-             <p style={{fontSize: "0.9em"}}>{pairingCode || "Message your bot to get a code."}</p>
-             
-             {telegramToken && (
-               <div style={{display: "flex", gap: "10px", marginTop: "10px", flexDirection: "column"}}>
-                 <input 
-                   type="password"
-                   placeholder="Enter code (e.g. 3RQ8EBFE)" 
-                   value={pairingInput} 
-                   onChange={(e) => setPairingInput(e.target.value)} 
-                   style={{textAlign: "center", letterSpacing: "2px"}}
-                 />
-                 <button onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
-                   {pairingStatus === "Verifying..." ? "Verifying..." : "Verify & Pair"}
-                 </button>
-                 {pairingStatus && <div style={{fontWeight: "bold", color: pairingStatus.includes("Error") ? "red" : "green"}}>{pairingStatus}</div>}
+              }} disabled={loading}>Back</button>
+            </div>
+            {(loading || error) && (
+               <div className="progress-container">
+                  <p style={{fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)"}}>{error ? "Installation Failed" : progress}</p>
+                  <div className="logs-container">
+                    <pre>{logs}</pre>
+                  </div>
                </div>
-             )}
+            )}
+            {error && (
+              <div style={{marginTop: "2rem"}}>
+                <button className="primary" style={{backgroundColor: "var(--error)", width: "100%"}} onClick={() => invoke("close_app")}>Exit Installation</button>
+              </div>
+            )}
           </div>
+        );
+      case 11:
+        return (
+          <div className="step-view">
+            <h2>Setup Complete! 🦞</h2>
+            <p className="step-description">OpenClaw is running and ready for your commands.</p>
 
-          <button onClick={() => open(dashboardUrl)} style={{marginTop: "20px"}}>Open Dashboard</button>
-          <p style={{ marginTop: "20px", fontSize: "0.9em", color: "#666" }}>
-            To chat via terminal: <code>openclaw tui</code>
-          </p>
+            <div className="pairing-result">
+               <h3>Telegram Pairing</h3>
+               <p style={{color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem"}}>
+                 Send any message to your bot to receive your code.
+               </p>
+               <div className="pairing-code-display">{pairingCode.includes("Ready") ? "READY" : pairingCode}</div>
+               
+               {telegramToken && (
+                 <div className="form-group" style={{marginTop: "2rem"}}>
+                   <input 
+                     type="text"
+                     placeholder="Enter code (e.g. 3RQ8EBFE)" 
+                     value={pairingInput} 
+                     onChange={(e) => setPairingInput(e.target.value.toUpperCase())} 
+                     style={{textAlign: "center", letterSpacing: "2px", fontWeight: "bold"}}
+                   />
+                   <button className="primary" style={{width: "100%", marginTop: "1rem"}} onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
+                     {pairingStatus === "Verifying..." ? "Verifying..." : "Pair Agent"}
+                   </button>
+                   {pairingStatus && (
+                     <p style={{marginTop: "1rem", fontWeight: "bold", color: pairingStatus.includes("Error") ? "var(--error)" : "var(--success)"}}>
+                       {pairingStatus}
+                     </p>
+                   )}
+                 </div>
+               )}
+            </div>
+
+            <div className="button-group" style={{flexDirection: "column", gap: "10px"}}>
+              <button className="primary" style={{width: "100%"}} onClick={() => open(dashboardUrl)}>Open Web Dashboard</button>
+              <button className="secondary" style={{width: "100%"}} onClick={() => invoke("close_app")}>Exit Setup</button>
+            </div>
+            <p style={{ marginTop: "2rem", fontSize: "0.85rem", color: "var(--text-muted)", textAlign: "center" }}>
+              Terminal access: <code>openclaw tui</code>
+            </p>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <aside className="sidebar">
+        <div className="logo">
+          🦞 ClawSetup
         </div>
-      )}
+        <ul className="step-list">
+          {stepsList.filter(s => mode === "advanced" || !s.advanced).map((s, idx) => (
+            <li key={s.id} className={`step-indicator ${getStepStatus(s.id)}`}>
+              <span className="step-number">{idx + 1}</span>
+              {s.name}
+            </li>
+          ))}
+        </ul>
+        <div style={{marginTop: "auto", fontSize: "0.75rem", color: "var(--text-muted)"}}>
+          OpenClaw v2026.2.6
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <div className="content-wrapper">
+          {renderStep()}
+        </div>
+      </main>
     </div>
   );
 }
