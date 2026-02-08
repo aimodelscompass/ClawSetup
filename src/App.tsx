@@ -25,6 +25,8 @@ function App() {
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
   const [openClawVersion, setOpenClawVersion] = useState("Checking...");
   const [maintenanceStatus, setMaintenanceStatus] = useState("");
+  const [selectedMaint, setSelectedMaint] = useState<string>("repair");
+  const [maintCompleted, setMaintCompleted] = useState(false);
 
   // Service Keys State
   const [serviceKeys, setServiceKeys] = useState<Record<string, string>>({});
@@ -194,10 +196,13 @@ function App() {
         res = await invoke("uninstall_openclaw");
         // Reset everything after uninstall
         setChecks(prev => ({ ...prev, openclaw: false }));
-        setStep(1);
+        setMaintCompleted(true);
+        setMaintenanceStatus(`✅ Uninstall completed successfully.`);
+        return;
       }
       setLogs(prev => prev + res);
       setMaintenanceStatus(`✅ ${action} completed successfully.`);
+      setMaintCompleted(true);
     } catch (e) {
       setLogs(prev => prev + `\nError: ${e}`);
       setMaintenanceStatus(`❌ ${action} failed.`);
@@ -230,26 +235,54 @@ function App() {
             <p className="step-description">OpenClaw is already installed on your system. What would you like to do?</p>
             
             <div className="mode-card-container" style={{gridTemplateColumns: "1fr", gap: "1rem"}}>
-              <div className={`mode-card ${loading && maintenanceStatus.includes("repair") ? "active" : ""}`} onClick={() => !loading && handleMaintenanceAction("repair")}>
+              <div 
+                className={`mode-card ${selectedMaint === "repair" ? "active" : ""}`} 
+                onClick={() => !loading && !maintCompleted && setSelectedMaint("repair")}
+              >
                 <h3>🛠 Repair System</h3>
                 <p>Run <code>openclaw doctor --repair</code> to fix configuration and service issues.</p>
               </div>
               
-              <div className={`mode-card ${loading && maintenanceStatus.includes("audit") ? "active" : ""}`} onClick={() => !loading && handleMaintenanceAction("audit")}>
+              <div 
+                className={`mode-card ${selectedMaint === "audit" ? "active" : ""}`} 
+                onClick={() => !loading && !maintCompleted && setSelectedMaint("audit")}
+              >
                 <h3>🛡 Security Audit</h3>
                 <p>Run <code>openclaw security audit --fix</code> to audit and tighten system permissions.</p>
               </div>
 
-              <div className="mode-card" style={{borderColor: "var(--error)"}} onClick={() => !loading && confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?") && handleMaintenanceAction("uninstall")}>
-                <h3 style={{color: "var(--error)"}}>🗑 Uninstall Completely</h3>
+              <div 
+                className={`mode-card ${selectedMaint === "uninstall" ? "active" : ""}`}
+                style={selectedMaint === "uninstall" ? {borderColor: "var(--error)", backgroundColor: "rgba(239, 68, 68, 0.05)"} : {}} 
+                onClick={() => !loading && !maintCompleted && setSelectedMaint("uninstall")}
+              >
+                <h3 style={selectedMaint === "uninstall" ? {color: "var(--error)"} : {}}>🗑 Uninstall Completely</h3>
                 <p>Remove the OpenClaw CLI and all local configuration/data files.</p>
               </div>
 
-              <div className="mode-card" onClick={() => setStep(1)}>
+              <div 
+                className={`mode-card ${selectedMaint === "reconfigure" ? "active" : ""}`} 
+                onClick={() => !loading && !maintCompleted && setSelectedMaint("reconfigure")}
+              >
                 <h3>⚙️ Re-configure Agent</h3>
                 <p>Proceed to the standard setup wizard to re-configure your agent and channels.</p>
               </div>
             </div>
+
+            {!maintCompleted && !loading && (
+              <div className="button-group">
+                <button className="primary" style={{width: "100%"}} onClick={() => {
+                  if (selectedMaint === "reconfigure") setStep(1);
+                  else if (selectedMaint === "uninstall") {
+                    if (confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?")) {
+                      handleMaintenanceAction("uninstall");
+                    }
+                  } else {
+                    handleMaintenanceAction(selectedMaint);
+                  }
+                }}>Confirm Action</button>
+              </div>
+            )}
 
             {maintenanceStatus && (
               <div className="progress-container" style={{marginTop: "2rem"}}>
@@ -257,6 +290,12 @@ function App() {
                 <div className="logs-container">
                   <pre>{logs}</pre>
                 </div>
+              </div>
+            )}
+
+            {maintCompleted && (
+              <div className="button-group">
+                <button className="primary" style={{width: "100%"}} onClick={() => invoke("close_app")}>Exit Setup</button>
               </div>
             )}
           </div>
@@ -281,6 +320,9 @@ function App() {
             )}
             <div className="button-group">
               <button className="primary" disabled={!checks.node} onClick={() => setStep(2)}>Continue</button>
+              {checks.openclaw && (
+                <button className="secondary" onClick={() => setStep(0)}>Back to Maintenance</button>
+              )}
             </div>
           </div>
         );
