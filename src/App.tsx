@@ -24,6 +24,7 @@ function App() {
   const [progress, setProgress] = useState("");
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
   const [openClawVersion, setOpenClawVersion] = useState("Checking...");
+  const [maintenanceStatus, setMaintenanceStatus] = useState("");
 
   // Service Keys State
   const [serviceKeys, setServiceKeys] = useState<Record<string, string>>({});
@@ -60,6 +61,7 @@ function App() {
   ];
 
   const stepsList = [
+    { id: 0, name: "System State", hidden: true },
     { id: 1, name: "System Check" },
     { id: 2, name: "Security" },
     { id: 3, name: "Mode" },
@@ -92,6 +94,10 @@ function App() {
     });
     const version: string = await invoke("get_openclaw_version");
     setOpenClawVersion(version);
+
+    if (res.openclaw_installed) {
+      setStep(0);
+    }
   }
 
   async function handleInstall() {
@@ -174,6 +180,31 @@ function App() {
     }
   }
 
+  async function handleMaintenanceAction(action: string) {
+    setLoading(true);
+    setMaintenanceStatus(`Running ${action}...`);
+    setLogs(`Starting maintenance: ${action}...\n`);
+    try {
+      let res: string;
+      if (action === "repair") {
+        res = await invoke("run_doctor_repair");
+      } else if (action === "audit") {
+        res = await invoke("run_security_audit_fix");
+      } else {
+        res = await invoke("uninstall_openclaw");
+        // Reset everything after uninstall
+        setChecks(prev => ({ ...prev, openclaw: false }));
+        setStep(1);
+      }
+      setLogs(prev => prev + res);
+      setMaintenanceStatus(`✅ ${action} completed successfully.`);
+    } catch (e) {
+      setLogs(prev => prev + `\nError: ${e}`);
+      setMaintenanceStatus(`❌ ${action} failed.`);
+    }
+    setLoading(false);
+  }
+
   const toggleSkill = (id: string) => {
     setSelectedSkills(prev => 
       prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
@@ -192,6 +223,44 @@ function App() {
 
   const renderStep = () => {
     switch (step) {
+      case 0:
+        return (
+          <div className="step-view">
+            <h2>Welcome Back</h2>
+            <p className="step-description">OpenClaw is already installed on your system. What would you like to do?</p>
+            
+            <div className="mode-card-container" style={{gridTemplateColumns: "1fr", gap: "1rem"}}>
+              <div className={`mode-card ${loading && maintenanceStatus.includes("repair") ? "active" : ""}`} onClick={() => !loading && handleMaintenanceAction("repair")}>
+                <h3>🛠 Repair System</h3>
+                <p>Run <code>openclaw doctor --repair</code> to fix configuration and service issues.</p>
+              </div>
+              
+              <div className={`mode-card ${loading && maintenanceStatus.includes("audit") ? "active" : ""}`} onClick={() => !loading && handleMaintenanceAction("audit")}>
+                <h3>🛡 Security Audit</h3>
+                <p>Run <code>openclaw security audit --fix</code> to audit and tighten system permissions.</p>
+              </div>
+
+              <div className="mode-card" style={{borderColor: "var(--error)"}} onClick={() => !loading && confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?") && handleMaintenanceAction("uninstall")}>
+                <h3 style={{color: "var(--error)"}}>🗑 Uninstall Completely</h3>
+                <p>Remove the OpenClaw CLI and all local configuration/data files.</p>
+              </div>
+
+              <div className="mode-card" onClick={() => setStep(1)}>
+                <h3>⚙️ Re-configure Agent</h3>
+                <p>Proceed to the standard setup wizard to re-configure your agent and channels.</p>
+              </div>
+            </div>
+
+            {maintenanceStatus && (
+              <div className="progress-container" style={{marginTop: "2rem"}}>
+                <p style={{fontSize: "0.9rem", color: maintenanceStatus.includes("❌") ? "var(--error)" : "var(--primary)"}}>{maintenanceStatus}</p>
+                <div className="logs-container">
+                  <pre>{logs}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        );
       case 1:
         return (
           <div className="step-view">
@@ -679,12 +748,15 @@ function App() {
           🦞 ClawSetup
         </div>
         <ul className="step-list">
-          {stepsList.filter(s => mode === "advanced" || !s.advanced).map((s, idx) => (
-            <li key={s.id} className={`step-indicator ${getStepStatus(s.id)}`}>
-              <span className="step-number">{idx + 1}</span>
-              {s.name}
-            </li>
-          ))}
+          {stepsList
+            .filter(s => !s.hidden)
+            .filter(s => mode === "advanced" || !s.advanced)
+            .map((s, idx) => (
+              <li key={s.id} className={`step-indicator ${getStepStatus(s.id)}`}>
+                <span className="step-number">{idx + 1}</span>
+                {s.name}
+              </li>
+            ))}
         </ul>
       </aside>
 

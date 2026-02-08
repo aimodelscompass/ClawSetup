@@ -79,6 +79,34 @@ fn get_openclaw_version() -> String {
 }
 
 #[command]
+fn uninstall_openclaw() -> Result<String, String> {
+    // 1. Stop gateway first
+    let _ = shell_command("openclaw gateway stop");
+    
+    // 2. Uninstall package
+    shell_command("npm uninstall -g openclaw")?;
+    
+    // 3. Remove data directory
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let openclaw_root = home.join(".openclaw");
+    if openclaw_root.exists() {
+        fs::remove_dir_all(openclaw_root).map_err(|e| e.to_string())?;
+    }
+
+    Ok("OpenClaw has been completely uninstalled.".to_string())
+}
+
+#[command]
+fn run_doctor_repair() -> Result<String, String> {
+    shell_command("openclaw doctor --repair --yes")
+}
+
+#[command]
+fn run_security_audit_fix() -> Result<String, String> {
+    shell_command("openclaw security audit --fix")
+}
+
+#[command]
 fn check_prerequisites() -> PrereqCheck {
     // Use shell_command to properly source user's PATH
     let node = shell_command("node -v").is_ok();
@@ -525,7 +553,10 @@ fn main() {
             close_app,
             install_skill,
             start_provider_auth,
-            get_openclaw_version
+            get_openclaw_version,
+            uninstall_openclaw,
+            run_doctor_repair,
+            run_security_audit_fix
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
