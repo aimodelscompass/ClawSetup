@@ -23,6 +23,7 @@ function App() {
   const [telegramToken, setTelegramToken] = useState("");
   const [progress, setProgress] = useState("");
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
+  const [openClawVersion, setOpenClawVersion] = useState("Checking...");
 
   // Service Keys State
   const [serviceKeys, setServiceKeys] = useState<Record<string, string>>({});
@@ -89,6 +90,8 @@ function App() {
       docker: res.docker_running,
       openclaw: res.openclaw_installed
     });
+    const version: string = await invoke("get_openclaw_version");
+    setOpenClawVersion(version);
   }
 
   async function handleInstall() {
@@ -98,7 +101,11 @@ function App() {
     try {
       setProgress("Installing OpenClaw (this may take a minute)...");
       setLogs("Installing OpenClaw (this may take a minute)...");
-      if (!checks.openclaw) await invoke("install_openclaw");
+      if (!checks.openclaw) {
+        await invoke("install_openclaw");
+        const version: string = await invoke("get_openclaw_version");
+        setOpenClawVersion(version);
+      }
 
       setProgress("Configuring agent...");
       setLogs("Configuring...");
@@ -679,7 +686,7 @@ function App() {
           ))}
         </ul>
         <div style={{marginTop: "auto", fontSize: "0.75rem", color: "var(--text-muted)"}}>
-          OpenClaw v2026.2.8
+          OpenClaw {openClawVersion}
         </div>
       </aside>
 

@@ -71,6 +71,14 @@ fn install_skill(name: String) -> Result<String, String> {
 }
 
 #[command]
+fn get_openclaw_version() -> String {
+    match shell_command("openclaw --version") {
+        Ok(v) => v.trim().to_string(),
+        Err(_) => "v2026.2.8".to_string(), // Fallback to last known if not installed yet
+    }
+}
+
+#[command]
 fn check_prerequisites() -> PrereqCheck {
     // Use shell_command to properly source user's PATH
     let node = shell_command("node -v").is_ok();
@@ -509,7 +517,8 @@ fn main() {
             approve_pairing,
             close_app,
             install_skill,
-            start_provider_auth
+            start_provider_auth,
+            get_openclaw_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
