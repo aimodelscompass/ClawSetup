@@ -237,7 +237,7 @@ function App() {
             <div className="mode-card-container" style={{gridTemplateColumns: "1fr", gap: "1rem"}}>
               <div 
                 className={`mode-card ${selectedMaint === "repair" ? "active" : ""}`} 
-                onClick={() => !loading && !maintCompleted && setSelectedMaint("repair")}
+                onClick={() => !loading && setSelectedMaint("repair")}
               >
                 <h3>🛠 Repair System</h3>
                 <p>Run <code>openclaw doctor --repair</code> to fix configuration and service issues.</p>
@@ -245,33 +245,33 @@ function App() {
               
               <div 
                 className={`mode-card ${selectedMaint === "audit" ? "active" : ""}`} 
-                onClick={() => !loading && !maintCompleted && setSelectedMaint("audit")}
+                onClick={() => !loading && setSelectedMaint("audit")}
               >
                 <h3>🛡 Security Audit</h3>
                 <p>Run <code>openclaw security audit --fix</code> to audit and tighten system permissions.</p>
               </div>
 
               <div 
-                className={`mode-card ${selectedMaint === "uninstall" ? "active" : ""}`}
-                style={selectedMaint === "uninstall" ? {borderColor: "var(--error)", backgroundColor: "rgba(239, 68, 68, 0.05)"} : {}} 
-                onClick={() => !loading && !maintCompleted && setSelectedMaint("uninstall")}
-              >
-                <h3 style={selectedMaint === "uninstall" ? {color: "var(--error)"} : {}}>🗑 Uninstall Completely</h3>
-                <p>Remove the OpenClaw CLI and all local configuration/data files.</p>
-              </div>
-
-              <div 
                 className={`mode-card ${selectedMaint === "reconfigure" ? "active" : ""}`} 
-                onClick={() => !loading && !maintCompleted && setSelectedMaint("reconfigure")}
+                onClick={() => !loading && setSelectedMaint("reconfigure")}
               >
                 <h3>⚙️ Re-configure Agent</h3>
                 <p>Proceed to the standard setup wizard to re-configure your agent and channels.</p>
               </div>
+
+              <div 
+                className={`mode-card ${selectedMaint === "uninstall" ? "active" : ""}`}
+                style={selectedMaint === "uninstall" ? {borderColor: "var(--error)", backgroundColor: "rgba(239, 68, 68, 0.05)"} : {}} 
+                onClick={() => !loading && setSelectedMaint("uninstall")}
+              >
+                <h3 style={selectedMaint === "uninstall" ? {color: "var(--error)"} : {}}>🗑 Uninstall Completely</h3>
+                <p>Remove the OpenClaw CLI and all local configuration/data files.</p>
+              </div>
             </div>
 
-            {!maintCompleted && !loading && (
-              <div className="button-group">
-                <button className="primary" style={{width: "100%"}} onClick={() => {
+            {!loading && (
+              <div className="button-group" style={{gap: "10px"}}>
+                <button className="primary" style={{flex: 1}} onClick={() => {
                   if (selectedMaint === "reconfigure") setStep(1);
                   else if (selectedMaint === "uninstall") {
                     if (confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?")) {
@@ -281,6 +281,9 @@ function App() {
                     handleMaintenanceAction(selectedMaint);
                   }
                 }}>Confirm Action</button>
+                {maintCompleted && (
+                  <button className="secondary" style={{flex: 1}} onClick={() => invoke("close_app")}>Exit Setup</button>
+                )}
               </div>
             )}
 
@@ -290,12 +293,6 @@ function App() {
                 <div className="logs-container">
                   <pre>{logs}</pre>
                 </div>
-              </div>
-            )}
-
-            {maintCompleted && (
-              <div className="button-group">
-                <button className="primary" style={{width: "100%"}} onClick={() => invoke("close_app")}>Exit Setup</button>
               </div>
             )}
           </div>
