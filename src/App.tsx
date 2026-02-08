@@ -190,8 +190,10 @@ function App() {
       let res: string;
       if (action === "repair") {
         res = await invoke("run_doctor_repair");
+        setMaintenanceStatus(`✅ Repair completed successfully.`);
       } else if (action === "audit") {
         res = await invoke("run_security_audit_fix");
+        setMaintenanceStatus(`✅ Security Audit completed successfully.`);
       } else {
         res = await invoke("uninstall_openclaw");
         // Reset everything after uninstall
