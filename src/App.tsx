@@ -196,12 +196,9 @@ function App() {
         res = await invoke("uninstall_openclaw");
         // Reset everything after uninstall
         setChecks(prev => ({ ...prev, openclaw: false }));
-        setMaintCompleted(true);
         setMaintenanceStatus(`✅ Uninstall completed successfully.`);
-        return;
       }
-      setLogs(prev => prev + res);
-      setMaintenanceStatus(`✅ ${action} completed successfully.`);
+      setLogs(prev => prev + (res || ""));
       setMaintCompleted(true);
     } catch (e) {
       setLogs(prev => prev + `\nError: ${e}`);
