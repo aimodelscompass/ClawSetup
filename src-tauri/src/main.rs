@@ -10,11 +10,20 @@ use rand::Rng;
 struct AgentConfig {
     provider: String,
     api_key: String,
+    auth_method: Option<String>,
     model: String,
     user_name: String,
     agent_name: String,
     agent_vibe: String,
     telegram_token: Option<String>,
+    // Advanced fields
+    gateway_port: Option<u16>,
+    gateway_bind: Option<String>,
+    gateway_auth_mode: Option<String>,
+    tailscale_mode: Option<String>,
+    node_manager: Option<String>,
+    skills: Option<Vec<String>>,
+    service_keys: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(serde::Serialize)]
@@ -22,6 +31,43 @@ struct PrereqCheck {
     node_installed: bool,
     docker_running: bool,
     openclaw_installed: bool,
+}
+
+#[command]
+fn start_provider_auth(provider: String, method: String) -> Result<String, String> {
+    // Run openclaw models auth login --provider <provider> --method <method>
+    // Note: For OAuth flows, this usually opens a browser.
+    // We might not get the token back directly in stdout if it's purely interactive,
+    // but we can try to read it from auth-profiles.json after.
+    
+    let cmd = format!("openclaw models auth login --provider {} --method {}", provider, method);
+    shell_command(&cmd)?;
+    
+    // Try to extract the token from auth-profiles.json
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let profile_name = format!("{}:default", provider);
+    let auth_path = home.join(".openclaw").join("agents").join("main").join("agent").join("auth-profiles.json");
+    
+    if auth_path.exists() {
+        let content = fs::read_to_string(auth_path).map_err(|e| e.to_string())?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        if let Some(token) = json.get("profiles").and_then(|p| p.get(&profile_name)).and_then(|p| p.get("token")).and_then(|t| t.as_str()) {
+            return Ok(token.to_string());
+        }
+    }
+    
+    Ok("Authenticated via browser. Token synced.".to_string())
+}
+
+#[command]
+fn close_app(window: tauri::Window) {
+    let _ = window.close();
+}
+
+#[command]
+fn install_skill(name: String) -> Result<String, String> {
+    // Use npx clawhub install as recommended by openclaw help
+    shell_command(&format!("npx clawhub install {}", name))
 }
 
 #[command]
@@ -68,9 +114,10 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     // Build profile name (e.g., "anthropic:default")
     let profile_name = format!("{}:default", config.provider);
+    let auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
 
     // Handle Telegram config section
-    let telegram_section = if let Some(token) = config.telegram_token {
+    let telegram_section = if let Some(ref token) = config.telegram_token {
         if !token.is_empty() {
             format!(r#",
   "plugins": {{
@@ -99,7 +146,12 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     };
 
     // Write openclaw.json (NOT config.json!)
-    let config_json = format!(r#"{{
+    let gateway_port = config.gateway_port.unwrap_or(18789);
+    let gateway_bind = config.gateway_bind.unwrap_or_else(|| "loopback".to_string());
+    let gateway_auth_mode = config.gateway_auth_mode.unwrap_or_else(|| "token".to_string());
+    let tailscale_mode = config.tailscale_mode.unwrap_or_else(|| "off".to_string());
+
+    let config_json_raw = format!(r#"{{
   "messages": {{
     "ackReactionScope": "group-mentions"
   }},
@@ -123,14 +175,14 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
   }},
   "gateway": {{
     "mode": "local",
-    "port": 18789,
-    "bind": "loopback",
+    "port": {},
+    "bind": "{}",
     "auth": {{
-      "mode": "token",
+      "mode": "{}",
       "token": "{}"
     }},
     "tailscale": {{
-      "mode": "off",
+      "mode": "{}",
       "resetOnExit": false
     }}
   }},
@@ -138,7 +190,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     "profiles": {{
       "{}": {{
         "provider": "{}",
-        "mode": "token"
+        "mode": "{}"
       }}
     }}
   }}{}
@@ -146,29 +198,62 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         workspace.to_string_lossy(),
         config.model,
         config.model,
+        gateway_port,
+        gateway_bind,
+        gateway_auth_mode,
         gateway_token,
+        tailscale_mode,
         profile_name,
         config.provider,
+        auth_mode,
         telegram_section
     );
 
-    fs::write(openclaw_root.join("openclaw.json"), config_json).map_err(|e| e.to_string())?;
+    fs::write(openclaw_root.join("openclaw.json"), config_json_raw).map_err(|e| e.to_string())?;
 
-    // Write auth-profiles.json with the actual API key
-    let auth_profiles_json = format!(r#"{{
-  "version": 1,
-  "profiles": {{
-    "{}": {{
-      "type": "token",
-      "provider": "{}",
-      "token": "{}"
-    }}
-  }},
-  "lastGood": {{
-    "{}": "{}"
-  }},
-  "usageStats": {{}}
-}}"#, profile_name, config.provider, config.api_key, config.provider, profile_name);
+    // Set nodeManager via CLI to ensure it's valid and avoid "Unknown config keys" warnings
+    if let Some(nm) = config.node_manager {
+        let _ = shell_command(&format!("openclaw config set skills.nodeManager {}", nm));
+    }
+
+    // Enable telegram plugin if token is provided
+    if let Some(ref token) = config.telegram_token {
+        if !token.is_empty() {
+            let _ = shell_command("openclaw plugins enable telegram");
+        }
+    }
+
+    // Write auth-profiles.json
+    let mut profiles_map = serde_json::Map::new();
+    
+    // Add primary AI profile
+    let mut primary_p = serde_json::Map::new();
+    primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode));
+    primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
+    primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+    profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
+
+    // Add Service Keys
+    if let Some(service_keys) = &config.service_keys {
+        for (sid, key) in service_keys {
+            let mut p = serde_json::Map::new();
+            p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+            p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
+            p.insert("token".to_string(), serde_json::Value::String(key.clone()));
+            profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+        }
+    }
+
+    let auth_profiles_val = serde_json::json!({
+      "version": 1,
+      "profiles": profiles_map,
+      "lastGood": {
+        config.provider.clone(): profile_name
+      },
+      "usageStats": {}
+    });
+
+    let auth_profiles_json = serde_json::to_string_pretty(&auth_profiles_val).map_err(|e| e.to_string())?;
 
     fs::write(agents_dir.join("auth-profiles.json"), auth_profiles_json).map_err(|e| e.to_string())?;
 
@@ -421,7 +506,10 @@ fn main() {
             start_gateway,
             generate_pairing_code,
             get_dashboard_url,
-            approve_pairing
+            approve_pairing,
+            close_app,
+            install_skill,
+            start_provider_auth
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
