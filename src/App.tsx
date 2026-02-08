@@ -19,7 +19,7 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [authMethod, setAuthMethod] = useState("token"); 
   const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("anthropic/claude-3-5-sonnet-20241022");
+  const [model, setModel] = useState("anthropic/claude-opus-4-6");
   const [telegramToken, setTelegramToken] = useState("");
   const [progress, setProgress] = useState("");
   const [dashboardUrl, setDashboardUrl] = useState("http://127.0.0.1:18789");
@@ -27,7 +27,7 @@ function App() {
   // Service Keys State
   const [serviceKeys, setServiceKeys] = useState<Record<string, string>>({});
   const [currentServiceIdx, setCurrentServiceIdx] = useState(0);
-  const [isConfiguringService, setIsConfiguringService] = useState<boolean | null>(null);
+  const [isConfiguringService, setIsConfiguringService] = useState<boolean | null>(false);
 
   const servicesToConfigure = [
     { id: "goplaces", name: "Google Places", placeholder: "API Key" },
@@ -328,7 +328,13 @@ function App() {
             <p className="step-description">Select your AI provider and authentication method.</p>
             <div className="form-group">
               <label>AI Provider</label>
-              <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <select value={provider} onChange={(e) => {
+                const p = e.target.value;
+                setProvider(p);
+                if (p === "anthropic") setModel("anthropic/claude-opus-4-6");
+                else if (p === "openai") setModel("openai/gpt-4o");
+                else if (p === "google") setModel("google/gemini-2.0-flash-exp");
+              }}>
                 <option value="anthropic">Anthropic</option>
                 <option value="openai">OpenAI</option>
                 <option value="google">Google Gemini</option>
@@ -529,7 +535,7 @@ function App() {
             <div className="button-group">
               <button className="primary" onClick={() => {
                 setCurrentServiceIdx(0);
-                setIsConfiguringService(null);
+                setIsConfiguringService(false);
                 setStep(10.5);
               }}>Continue</button>
               <button className="secondary" onClick={() => setStep(9)}>Back</button>
@@ -569,7 +575,7 @@ function App() {
             <div className="button-group">
               <button 
                 className="primary"
-                disabled={isConfiguringService === null || (isConfiguringService === true && !serviceKeys[servicesToConfigure[currentServiceIdx].id])} 
+                disabled={isConfiguringService === true && !serviceKeys[servicesToConfigure[currentServiceIdx].id]} 
                 onClick={() => {
                   const sid = servicesToConfigure[currentServiceIdx].id;
                   const newKeys = { ...serviceKeys };
@@ -578,7 +584,7 @@ function App() {
 
                   if (currentServiceIdx < servicesToConfigure.length - 1) {
                     setCurrentServiceIdx(currentServiceIdx + 1);
-                    setIsConfiguringService(null);
+                    setIsConfiguringService(false);
                   } else {
                     handleInstall();
                   }
@@ -673,7 +679,7 @@ function App() {
           ))}
         </ul>
         <div style={{marginTop: "auto", fontSize: "0.75rem", color: "var(--text-muted)"}}>
-          OpenClaw v2026.2.6
+          OpenClaw v2026.2.8
         </div>
       </aside>
 
