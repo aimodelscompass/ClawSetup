@@ -627,6 +627,7 @@ function App() {
         return (
           <div className="step-view">
             <h2>Setup Complete! 🦞</h2>
+            <p style={{fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem"}}>OpenClaw {openClawVersion}</p>
             <p className="step-description">OpenClaw is running and ready for your commands.</p>
 
             <div className="pairing-result">
@@ -685,9 +686,6 @@ function App() {
             </li>
           ))}
         </ul>
-        <div style={{marginTop: "auto", fontSize: "0.75rem", color: "var(--text-muted)"}}>
-          OpenClaw {openClawVersion}
-        </div>
       </aside>
 
       <main className="main-content">
