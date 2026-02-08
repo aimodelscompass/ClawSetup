@@ -52,10 +52,10 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 750,
+        "height": 850,
         "resizable": true,
         "title": "ClawSetup",
-        "width": 1000
+        "width": 1200
       }
     ]
   }

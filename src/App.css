@@ -45,35 +45,35 @@ body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 2rem 1.5rem;
+  padding: 1.5rem 1rem;
   flex-shrink: 0;
 }
 
 .logo {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 800;
   color: var(--primary);
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 3rem;
+  margin-bottom: 2rem;
 }
 
 .step-list {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.4rem;
 }
 
 .step-indicator {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 8px;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
   transition: all 0.2s ease;
 }
@@ -88,14 +88,14 @@ body {
 }
 
 .step-number {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: 1px solid currentColor;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   flex-shrink: 0;
 }
 
@@ -103,7 +103,7 @@ body {
 .main-content {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 4rem;
+  padding: 2.5rem;
   display: flex;
   justify-content: center;
 }
@@ -123,28 +123,29 @@ body {
 }
 
 h2 {
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .step-description {
   color: var(--text-muted);
-  margin-bottom: 2.5rem;
-  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+  font-size: 0.95rem;
 }
 
 /* Form Elements */
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 label {
   display: block;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -154,9 +155,9 @@ input, select, textarea {
   background-color: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.875rem 1rem;
+  padding: 0.75rem 0.875rem;
   color: var(--text-main);
-  font-size: 1rem;
+  font-size: 0.95rem;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -167,25 +168,25 @@ input:focus, select:focus {
 }
 
 .input-hint {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 
 /* Buttons */
 .button-group {
   display: flex;
-  gap: 1rem;
-  margin-top: 3rem;
+  gap: 0.75rem;
+  margin-top: 2rem;
 }
 
 button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.875rem 1.75rem;
+  padding: 0.75rem 1.5rem;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
