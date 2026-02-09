@@ -44,19 +44,24 @@ struct PrereqCheck {
 
 #[command]
 async fn test_ssh_connection(ip: String, user: String, password: Option<String>, private_key_path: Option<String>) -> Result<String, String> {
-    // 1. Check network connectivity (ping -c 1 -W 2)
-    let ping_output = Command::new("ping")
-        .args(["-c", "1", "-W", "2", &ip])
-        .output()
-        .map_err(|e| format!("Ping failed: {}", e))?;
+    use std::net::ToSocketAddrs;
 
-    if !ping_output.status.success() {
-        return Err("Network connectivity failed. Please check the IP address and your network.".to_string());
+    // 1. Check network connectivity by trying to connect to port 22
+    // Ping is unreliable as many servers/firewalls block ICMP
+    let addr = format!("{}:22", ip);
+    let socket_addrs = addr.to_socket_addrs().map_err(|_| "Invalid IP address or hostname format".to_string())?;
+    
+    let mut tcp = None;
+    for sa in socket_addrs {
+        if let Ok(stream) = TcpStream::connect_timeout(&sa, Duration::from_secs(5)) {
+            tcp = Some(stream);
+            break;
+        }
     }
 
+    let tcp = tcp.ok_or_else(|| "Connectivity failed. Could not reach port 22 on the remote server. Please check the IP address and your network.".to_string())?;
+
     // 2. Try SSH connection
-    let tcp = TcpStream::connect(format!("{}:22", ip))
-        .map_err(|e| format!("Failed to connect to port 22: {}", e))?;
     let mut sess = Session::new().map_err(|e| e.to_string())?;
     sess.set_tcp_stream(tcp);
     sess.handshake().map_err(|e| format!("SSH handshake failed: {}", e))?;
