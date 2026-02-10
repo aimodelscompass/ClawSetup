@@ -257,15 +257,9 @@ fn create_custom_skill(name: String, content: String) -> Result<String, String> 
 
 #[command]
 fn start_provider_auth(provider: String, method: String) -> Result<String, String> {
-    // Run openclaw models auth login --provider <provider> --method <method>
-    // Note: For OAuth flows, this usually opens a browser.
-    // We might not get the token back directly in stdout if it's purely interactive,
-    // but we can try to read it from auth-profiles.json after.
-    
     let cmd = format!("openclaw models auth login --provider {} --method {}", provider, method);
     shell_command(&cmd)?;
     
-    // Try to extract the token from auth-profiles.json
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let profile_name = format!("{}:default", provider);
     let auth_path = home.join(".openclaw").join("agents").join("main").join("agent").join("auth-profiles.json");
@@ -288,7 +282,6 @@ fn close_app(window: tauri::Window) {
 
 #[command]
 fn install_skill(name: String) -> Result<String, String> {
-    // Use npx clawhub install as recommended by openclaw help
     shell_command(&format!("npx clawhub install {}", name))
 }
 
@@ -296,19 +289,15 @@ fn install_skill(name: String) -> Result<String, String> {
 fn get_openclaw_version() -> String {
     match shell_command("openclaw --version") {
         Ok(v) => v.trim().to_string(),
-        Err(_) => "v2026.2.8".to_string(), // Fallback to last known if not installed yet
+        Err(_) => "v2026.2.8".to_string(),
     }
 }
 
 #[command]
 fn uninstall_openclaw() -> Result<String, String> {
-    // 1. Stop gateway first
     let _ = shell_command("openclaw gateway stop");
-    
-    // 2. Uninstall package
     shell_command("npm uninstall -g openclaw")?;
     
-    // 3. Remove data directory
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let openclaw_root = home.join(".openclaw");
     if openclaw_root.exists() {
@@ -330,26 +319,20 @@ fn run_security_audit_fix() -> Result<String, String> {
 
 #[command]
 fn check_prerequisites() -> PrereqCheck {
-    // Use shell_command to properly source user's PATH
     let node = shell_command("node -v").is_ok();
-    // Docker not needed on macOS - OpenClaw runs natively
     let openclaw = shell_command("openclaw --version").is_ok();
 
     PrereqCheck {
         node_installed: node,
-        docker_running: true, // Always true on macOS (not needed)
+        docker_running: true, 
         openclaw_installed: openclaw,
     }
 }
 
 #[command]
 fn install_openclaw() -> Result<String, String> {
-    // Install via npm using shell_command for proper PATH
     shell_command("npm install -g openclaw")?;
-
-    // Verify installation
     shell_command("openclaw --version")?;
-
     Ok("OpenClaw installed successfully.".to_string())
 }
 
@@ -363,33 +346,28 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
     fs::create_dir_all(&agents_dir).map_err(|e| e.to_string())?;
 
-    // Generate a random gateway token
     let gateway_token: String = rand::thread_rng()
         .sample_iter(&rand::distributions::Alphanumeric)
         .take(32)
         .map(char::from)
         .collect();
 
-    // Build profile name (e.g., "anthropic:default")
     let profile_name = format!("{}:default", config.provider);
-    let mut auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
+    let mut auth_mode = config.auth_method.as_deref().unwrap_or("token").to_string();
 
-    // Map specialized auth flows to standard OpenClaw modes for the config files
     if auth_mode == "setup-token" {
         auth_mode = "token".to_string();
     } else if auth_mode == "antigravity" || auth_mode == "gemini_cli" || auth_mode == "codex" {
         auth_mode = "oauth".to_string();
     }
 
-    // NEW: Build heartbeat config section for agents.defaults
     let heartbeat_section = match config.heartbeat_mode.as_deref() {
         Some("never") => r#","heartbeat": { "enabled": false }"#.to_string(),
         Some("idle") => format!(r#","heartbeat": {{ "mode": "idle", "timeout": {} }}"#, config.idle_timeout_ms.unwrap_or(3600000)),
         Some(interval) => format!(r#","heartbeat": {{ "every": "{}" }}"#, interval),
-        None => r#","heartbeat": { "every": "1h" }"#.to_string()
+        None => String::new()
     };
 
-    // NEW: Build fallback models section
     let fallbacks_section = if let Some(fb) = config.fallback_models.as_ref() {
         if !fb.is_empty() {
             format!(r#","fallbacks": {}"#, serde_json::to_string(fb).unwrap())
@@ -400,42 +378,34 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         String::new()
     };
 
-    // NEW: Build sandbox section
     let sandbox_section = if let Some(mode) = config.sandbox_mode.as_ref() {
-        format!(r#",
-  "sandbox": {{ "mode": "{}" }}"#, mode)
+        format!(r#","sandbox": {{ "mode": "{}" }}"#, mode)
     } else {
         String::new()
     };
 
-    // NEW: Build tools section
     let tools_section = if let Some(mode) = config.tools_mode.as_ref() {
         match mode.as_str() {
             "allowlist" => {
                 if let Some(tools) = config.allowed_tools.as_ref() {
-                    format!(r#",
-  "tools": {{ "mode": "allowlist", "allow": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","tools": {{ "allow": {} }}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             "denylist" => {
                 if let Some(tools) = config.denied_tools.as_ref() {
-                    format!(r#",
-  "tools": {{ "mode": "denylist", "deny": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","tools": {{ "deny": {} }}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
-            "all" => r#",
-  "tools": { "mode": "all" }"#.to_string(),
             _ => String::new()
         }
     } else {
         String::new()
     };
 
-    // Handle Telegram config section
     let telegram_section = if let Some(ref token) = config.telegram_token {
         if !token.is_empty() {
             format!(r#",
@@ -464,11 +434,22 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         String::new()
     };
 
-    // Write openclaw.json (NOT config.json!)
     let gateway_port = config.gateway_port.unwrap_or(18789);
-    let gateway_bind = config.gateway_bind.unwrap_or_else(|| "loopback".to_string());
-    let gateway_auth_mode = config.gateway_auth_mode.unwrap_or_else(|| "token".to_string());
-    let tailscale_mode = config.tailscale_mode.unwrap_or_else(|| "off".to_string());
+    let gateway_bind = config.gateway_bind.as_deref().unwrap_or("loopback");
+    let gateway_auth_mode = config.gateway_auth_mode.as_deref().unwrap_or("token");
+    let tailscale_mode = config.tailscale_mode.as_deref().unwrap_or("off");
+
+    let mut agents_list = vec![serde_json::json!({ "id": "main" })];
+    if let Some(agents) = &config.agents {
+        for agent in agents {
+            agents_list.push(serde_json::json!({
+                "id": agent.id,
+                "name": agent.name,
+                "workspace": format!("{}/.openclaw/agents/{}/workspace", home.to_string_lossy(), agent.id),
+                "agentDir": format!("{}/.openclaw/agents/{}/agent", home.to_string_lossy(), agent.id)
+            }));
+        }
+    }
 
     let config_json_raw = format!(r#"{{
   "messages": {{
@@ -489,8 +470,9 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
       }},
       "models": {{
         "{model}": {{}}
-      }}{heartbeat}
-    }}
+      }}{heartbeat}{sandbox}{tools}
+    }},
+    "list": {agents_list}
   }},
   "gateway": {{
     "mode": "local",
@@ -512,12 +494,15 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         "mode": "{mode}"
       }}
     }}
-  }}{telegram}{sandbox}{tools}
+  }}{telegram}
 }}"#,
         workspace = workspace.to_string_lossy(),
         model = config.model,
         fallbacks = fallbacks_section,
         heartbeat = heartbeat_section,
+        sandbox = sandbox_section,
+        tools = tools_section,
+        agents_list = serde_json::to_string(&agents_list).unwrap(),
         port = gateway_port,
         bind = gateway_bind,
         auth_mode = gateway_auth_mode,
@@ -526,36 +511,91 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         profile = profile_name,
         provider = config.provider,
         mode = auth_mode,
-        telegram = telegram_section,
-        sandbox = sandbox_section,
-        tools = tools_section
+        telegram = telegram_section
     );
 
     fs::write(openclaw_root.join("openclaw.json"), config_json_raw).map_err(|e| e.to_string())?;
 
-    // Set nodeManager via CLI to ensure it's valid and avoid "Unknown config keys" warnings
+    if let Some(agents) = &config.agents {
+        for agent in agents {
+            let agent_workspace = openclaw_root.join("agents").join(&agent.id).join("workspace");
+            let agent_config_dir = openclaw_root.join("agents").join(&agent.id).join("agent");
+
+            fs::create_dir_all(&agent_workspace).map_err(|e| e.to_string())?;
+            fs::create_dir_all(&agent_config_dir).map_err(|e| e.to_string())?;
+
+            let agent_identity = agent.identity_md.clone().unwrap_or_else(|| {
+                format!(r#"# IDENTITY.md - Who Am I?
+- **Name:** {}
+- **Vibe:** {}
+- **Emoji:** 🦞
+---
+Managed by ClawSetup."#, agent.name, agent.vibe)
+            });
+            fs::write(agent_workspace.join("IDENTITY.md"), agent_identity).map_err(|e| e.to_string())?;
+
+            let agent_user_md = agent.user_md.clone().unwrap_or_else(|| {
+                format!(r#"# USER.md - About Your Human
+- **Name:** {}
+---"#, config.user_name)
+            });
+            fs::write(agent_workspace.join("USER.md"), agent_user_md).map_err(|e| e.to_string())?;
+
+            let agent_soul_md = agent.soul_md.clone().unwrap_or_else(|| {
+                format!(r#"# SOUL.md
+## Mission
+Serve {}."#, config.user_name)
+            });
+            fs::write(agent_workspace.join("SOUL.md"), agent_soul_md).map_err(|e| e.to_string())?;
+
+            let mut agent_profiles_map = serde_json::Map::new();
+            let mut primary_ai = serde_json::Map::new();
+            primary_ai.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
+            primary_ai.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
+            primary_ai.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+            agent_profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_ai));
+
+            if let Some(service_keys) = &config.service_keys {
+                for (sid, key) in service_keys {
+                    let mut p = serde_json::Map::new();
+                    p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+                    p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
+                    p.insert("token".to_string(), serde_json::Value::String(key.clone()));
+                    agent_profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+                }
+            }
+
+            let agent_auth_profiles = serde_json::json!({
+                "version": 1,
+                "profiles": agent_profiles_map,
+                "lastGood": {
+                    config.provider.clone(): profile_name.clone()
+                },
+                "usageStats": {}
+            });
+
+            let agent_auth_json = serde_json::to_string_pretty(&agent_auth_profiles).map_err(|e| e.to_string())?;
+            fs::write(agent_config_dir.join("auth-profiles.json"), agent_auth_json).map_err(|e| e.to_string())?;
+        }
+    }
+
     if let Some(nm) = config.node_manager {
         let _ = shell_command(&format!("openclaw config set skills.nodeManager {}", nm));
     }
 
-    // Enable telegram plugin if token is provided
     if let Some(ref token) = config.telegram_token {
         if !token.is_empty() {
             let _ = shell_command("openclaw plugins enable telegram");
         }
     }
 
-    // Write auth-profiles.json
     let mut profiles_map = serde_json::Map::new();
-    
-    // Add primary AI profile
     let mut primary_p = serde_json::Map::new();
     primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
     primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
     primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
     profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
 
-    // Add Service Keys
     if let Some(service_keys) = &config.service_keys {
         for (sid, key) in service_keys {
             let mut p = serde_json::Map::new();
@@ -576,11 +616,8 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     });
 
     let auth_profiles_json = serde_json::to_string_pretty(&auth_profiles_val).map_err(|e| e.to_string())?;
-
     fs::write(agents_dir.join("auth-profiles.json"), auth_profiles_json).map_err(|e| e.to_string())?;
 
-    // Identity files (Identity, User, Soul)...
-    // Use custom content if provided, otherwise generate defaults
     let identity_md = if let Some(custom) = config.identity_md {
         custom
     } else {
@@ -611,116 +648,6 @@ Serve {}."#, config.user_name)
     };
     fs::write(workspace.join("SOUL.md"), soul_md).map_err(|e| e.to_string())?;
 
-    // Multi-Agent Configuration
-    if let Some(agents) = &config.agents {
-        for agent in agents {
-            let agent_workspace = openclaw_root.join("agents").join(&agent.id).join("workspace");
-            let agent_config_dir = openclaw_root.join("agents").join(&agent.id).join("agent");
-
-            fs::create_dir_all(&agent_workspace).map_err(|e| e.to_string())?;
-            fs::create_dir_all(&agent_config_dir).map_err(|e| e.to_string())?;
-
-            // Write agent-specific workspace files
-            let agent_identity = agent.identity_md.clone().unwrap_or_else(|| {
-                format!(r#"# IDENTITY.md - Who Am I?
-- **Name:** {}
-- **Vibe:** {}
-- **Emoji:** 🦞
----
-Managed by ClawSetup."#, agent.name, agent.vibe)
-            });
-            fs::write(agent_workspace.join("IDENTITY.md"), agent_identity).map_err(|e| e.to_string())?;
-
-            let agent_user_md = agent.user_md.clone().unwrap_or_else(|| {
-                format!(r#"# USER.md - About Your Human
-- **Name:** {}
----"#, config.user_name)
-            });
-            fs::write(agent_workspace.join("USER.md"), agent_user_md).map_err(|e| e.to_string())?;
-
-            let agent_soul_md = agent.soul_md.clone().unwrap_or_else(|| {
-                format!(r#"# SOUL.md
-## Mission
-Serve {}."#, config.user_name)
-            });
-            fs::write(agent_workspace.join("SOUL.md"), agent_soul_md).map_err(|e| e.to_string())?;
-
-            // Create agent-specific auth-profiles.json
-            let mut agent_profiles_map = serde_json::Map::new();
-            let mut primary_p = serde_json::Map::new();
-            primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
-            primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
-            primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
-            agent_profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
-
-            // Add service keys to agent profile
-            if let Some(service_keys) = &config.service_keys {
-                for (sid, key) in service_keys {
-                    let mut p = serde_json::Map::new();
-                    p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
-                    p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
-                    p.insert("token".to_string(), serde_json::Value::String(key.clone()));
-                    agent_profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
-                }
-            }
-
-            let agent_auth_profiles = serde_json::json!({
-                "version": 1,
-                "profiles": agent_profiles_map,
-                "lastGood": {
-                    config.provider.clone(): profile_name.clone()
-                },
-                "usageStats": {}
-            });
-
-            let agent_auth_json = serde_json::to_string_pretty(&agent_auth_profiles).map_err(|e| e.to_string())?;
-            fs::write(agent_config_dir.join("auth-profiles.json"), agent_auth_json).map_err(|e| e.to_string())?;
-
-            // Register agent with openclaw CLI
-            let _ = shell_command(&format!("openclaw agents add --id {} --name {}", agent.id, agent.name));
-        }
-
-        // Update openclaw.json with agents.entries
-        let config_path = openclaw_root.join("openclaw.json");
-        let config_content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-        let mut config_json: serde_json::Value = serde_json::from_str(&config_content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-        // Build agents.entries section
-        let mut entries = serde_json::Map::new();
-        for agent in agents {
-            let agent_workspace_path = openclaw_root.join("agents").join(&agent.id).join("workspace");
-            let mut agent_entry = serde_json::Map::new();
-            agent_entry.insert("name".to_string(), serde_json::Value::String(agent.name.clone()));
-            agent_entry.insert("workspace".to_string(), serde_json::Value::String(agent_workspace_path.to_string_lossy().to_string()));
-
-            let mut model_obj = serde_json::Map::new();
-            model_obj.insert("primary".to_string(), serde_json::Value::String(agent.model.clone()));
-            if let Some(fallbacks) = &agent.fallback_models {
-                if !fallbacks.is_empty() {
-                    model_obj.insert("fallbacks".to_string(), serde_json::to_value(fallbacks).unwrap());
-                }
-            }
-            agent_entry.insert("model".to_string(), serde_json::Value::Object(model_obj));
-
-            if let Some(skills) = &agent.skills {
-                agent_entry.insert("skills".to_string(), serde_json::to_value(skills).unwrap());
-            }
-
-            entries.insert(agent.id.clone(), serde_json::Value::Object(agent_entry));
-        }
-
-        if let Some(agents_section) = config_json.get_mut("agents") {
-            if let Some(agents_obj) = agents_section.as_object_mut() {
-                agents_obj.insert("entries".to_string(), serde_json::Value::Object(entries));
-            }
-        }
-
-        let updated_config = serde_json::to_string_pretty(&config_json)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        fs::write(&config_path, updated_config).map_err(|e| e.to_string())?;
-    }
-
     Ok("Configured.".into())
 }
 
@@ -730,37 +657,28 @@ fn start_gateway() -> Result<String, String> {
     let openclaw_root = home.join(".openclaw");
     let config_path = openclaw_root.join("openclaw.json");
 
-    // Stop any existing instance first
     let _ = shell_command("openclaw gateway stop");
     thread::sleep(Duration::from_secs(2));
 
-    // Backup our config if it exists (we'll merge it back after gateway install)
     let our_config = if config_path.exists() {
         Some(fs::read_to_string(&config_path).map_err(|e| e.to_string())?)
     } else {
         None
     };
 
-    // Install gateway service
     let install_output = shell_command("openclaw gateway install --force")?;
 
-    // Check for any error messages in install output
     if install_output.to_lowercase().contains("error") || install_output.to_lowercase().contains("failed") {
         return Err(format!("Gateway installation may have failed: {}", install_output));
     }
 
-    // If we had a config before, merge it back
     if let Some(old_config) = our_config {
-        // Read the newly generated config with auth token
         let new_config = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-
-        // Parse both configs
         let mut new_json: serde_json::Value = serde_json::from_str(&new_config)
             .map_err(|e| format!("Failed to parse new config: {}", e))?;
         let old_json: serde_json::Value = serde_json::from_str(&old_config)
             .map_err(|e| format!("Failed to parse old config: {}", e))?;
 
-        // Merge key sections from old config (preserve gateway.auth from new config)
         if let Some(agents) = old_json.get("agents") {
             new_json["agents"] = agents.clone();
         }
@@ -776,39 +694,33 @@ fn start_gateway() -> Result<String, String> {
         if let Some(channels) = old_json.get("channels") {
             new_json["channels"] = channels.clone();
         }
+        if let Some(tools) = old_json.get("tools") {
+            new_json["tools"] = tools.clone();
+        }
 
-        // Write merged config back
         let merged = serde_json::to_string_pretty(&new_json)
             .map_err(|e| format!("Failed to serialize merged config: {}", e))?;
         fs::write(&config_path, merged).map_err(|e| e.to_string())?;
     }
 
-    // Start the gateway (runs natively on macOS, not via Docker)
     let start_output = shell_command("openclaw gateway start")?;
 
-    // Check for errors in start output
     if start_output.to_lowercase().contains("error") || start_output.to_lowercase().contains("failed") {
         return Err(format!("Gateway start may have failed: {}", start_output));
     }
 
-    // Give it time to initialize - native process startup
     thread::sleep(Duration::from_secs(5));
 
-    // Try to verify it's actually accessible via network with multiple attempts
     let mut last_error = String::new();
     for attempt in 1..=8 {
-        // Try to connect to the gateway port (18789)
         if TcpStream::connect("127.0.0.1:18789").is_ok() {
-            // Port is open, gateway is listening!
             return Ok("Gateway started successfully and is accessible on port 18789.".to_string());
         }
 
-        // Check status output for diagnostic info
         if let Ok(status) = shell_command("openclaw gateway status") {
             let status_lower = status.to_lowercase();
             last_error = format!("Status: {} | Port 18789: not accessible", status.trim());
 
-            // If status indicates it's running but port isn't open yet, keep waiting
             if status_lower.contains("starting") || status_lower.contains("initializing") {
                 last_error = format!("Gateway is starting... (attempt {}/8)", attempt);
             }
@@ -821,7 +733,6 @@ fn start_gateway() -> Result<String, String> {
         }
     }
 
-    // Get final status for error message
     let final_status = shell_command("openclaw gateway status")
         .unwrap_or_else(|_| "Unable to get status".to_string());
 
@@ -841,26 +752,16 @@ fn start_gateway() -> Result<String, String> {
 
 #[command]
 fn generate_pairing_code() -> Result<String, String> {
-    // Give gateway a bit more time if needed
     thread::sleep(Duration::from_secs(2));
-
-    // Try to verify gateway is accessible (but don't fail if we can't verify)
     let _ = shell_command("openclaw gateway status");
-
-    // OpenClaw doesn't have a "pairing create" command.
-    // The flow is: user sends a message to the bot, then checks pending requests.
-    // Return instructions for the user.
     Ok("Ready! Send any message to your Telegram bot to start pairing. The bot will respond automatically with a code.".to_string())
 }
 
 #[command]
 fn approve_pairing(code: String, is_remote: bool, remote: Option<RemoteInfo>) -> Result<String, String> {
-    // Run: openclaw pairing approve <code> --channel telegram
     let output = if is_remote && remote.is_some() {
-        // Run on remote server via SSH
         execute_ssh(&remote.unwrap(), &format!("openclaw pairing approve {} --channel telegram", code))
     } else {
-        // Run locally
         shell_command(&format!("openclaw pairing approve {} --channel telegram", code))
     };
 
@@ -888,10 +789,8 @@ fn approve_pairing(code: String, is_remote: bool, remote: Option<RemoteInfo>) ->
 #[command]
 fn get_dashboard_url(is_remote: bool, remote: Option<RemoteInfo>) -> Result<String, String> {
     let token = if is_remote && remote.is_some() {
-        // Use existing get_remote_gateway_token function
         get_remote_gateway_token(remote.unwrap())?
     } else {
-        // Existing local read logic
         let home = dirs::home_dir().ok_or("Could not find home directory")?;
         let config_path = home.join(".openclaw").join("openclaw.json");
         let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
@@ -908,18 +807,13 @@ fn get_dashboard_url(is_remote: bool, remote: Option<RemoteInfo>) -> Result<Stri
     Ok(format!("http://127.0.0.1:18789/?token={}", token))
 }
 
-// SSH Remote Commands
-
 #[command]
 fn test_ssh_connection(remote: RemoteInfo) -> Result<String, String> {
-    // First test TCP connectivity
     TcpStream::connect(format!("{}:22", remote.ip))
         .map_err(|e| format!("Cannot reach {}:22 - {}", remote.ip, e))?;
 
-    // Then test SSH handshake and authentication
     let sess = connect_ssh(&remote)?;
 
-    // Execute a simple test command
     let mut channel = sess.channel_session()
         .map_err(|e| format!("Failed to open SSH channel: {}", e))?;
     channel.exec("echo 'SSH connection successful'")
@@ -939,7 +833,7 @@ fn check_remote_prerequisites(remote: RemoteInfo) -> Result<PrereqCheck, String>
 
     Ok(PrereqCheck {
         node_installed: node_check,
-        docker_running: true, // Not needed for remote
+        docker_running: true, 
         openclaw_installed: openclaw_check,
     })
 }
@@ -954,18 +848,14 @@ fn get_remote_openclaw_version(remote: RemoteInfo) -> String {
 
 #[command]
 fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<String, String> {
-    // Install Node.js if needed
     let node_check = execute_ssh(&remote, "node -v");
     if node_check.is_err() {
-        // Install Node.js via nvm
         execute_ssh(&remote, "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")?;
         execute_ssh(&remote, "source ~/.bashrc && nvm install --lts")?;
     }
 
-    // Install OpenClaw
     execute_ssh(&remote, "npm install -g openclaw")?;
 
-    // Configure OpenClaw remotely with COMPLETE parity to local setup
     let gateway_token: String = rand::thread_rng()
         .sample_iter(&rand::distributions::Alphanumeric)
         .take(32)
@@ -973,7 +863,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         .collect();
 
     let profile_name = format!("{}:default", config.provider);
-    let mut auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
+    let mut auth_mode = config.auth_method.as_deref().unwrap_or("token").to_string();
 
     if auth_mode == "setup-token" {
         auth_mode = "token".to_string();
@@ -981,15 +871,13 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         auth_mode = "oauth".to_string();
     }
 
-    // Build heartbeat config section
     let heartbeat_section = match config.heartbeat_mode.as_deref() {
         Some("never") => r#","heartbeat": { "enabled": false }"#.to_string(),
         Some("idle") => format!(r#","heartbeat": {{ "mode": "idle", "timeout": {} }}"#, config.idle_timeout_ms.unwrap_or(3600000)),
         Some(interval) => format!(r#","heartbeat": {{ "every": "{}" }}"#, interval),
-        None => r#","heartbeat": { "every": "1h" }"#.to_string()
+        None => String::new()
     };
 
-    // Build fallback models section
     let fallbacks_section = if let Some(fb) = config.fallback_models.as_ref() {
         if !fb.is_empty() {
             format!(r#","fallbacks": {}"#, serde_json::to_string(fb).unwrap())
@@ -1000,42 +888,34 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         String::new()
     };
 
-    // Build sandbox section
     let sandbox_section = if let Some(mode) = config.sandbox_mode.as_ref() {
-        format!(r#",
-  "sandbox": {{ "mode": "{}" }}"#, mode)
+        format!(r#","sandbox": {{ "mode": "{}" }}"#, mode)
     } else {
         String::new()
     };
 
-    // Build tools section
     let tools_section = if let Some(mode) = config.tools_mode.as_ref() {
         match mode.as_str() {
             "allowlist" => {
                 if let Some(tools) = config.allowed_tools.as_ref() {
-                    format!(r#",
-  "tools": {{ "mode": "allowlist", "allow": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","tools": {{ "allow": {} }}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             "denylist" => {
                 if let Some(tools) = config.denied_tools.as_ref() {
-                    format!(r#",
-  "tools": {{ "mode": "denylist", "deny": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","tools": {{ "deny": {} }}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
-            "all" => r#",
-  "tools": { "mode": "all" }"#.to_string(),
             _ => String::new()
         }
     } else {
         String::new()
     };
 
-    // Build Telegram section
     let telegram_section = if let Some(ref token) = config.telegram_token {
         if !token.is_empty() {
             format!(r#",
@@ -1064,44 +944,25 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         String::new()
     };
 
-    // Get gateway settings with proper defaults
     let gateway_port = config.gateway_port.unwrap_or(18789);
-    let gateway_bind = config.gateway_bind.unwrap_or_else(|| "loopback".to_string());
-    let gateway_auth_mode = config.gateway_auth_mode.unwrap_or_else(|| "token".to_string());
-    let tailscale_mode = config.tailscale_mode.unwrap_or_else(|| "off".to_string());
+    let gateway_bind = config.gateway_bind.as_deref().unwrap_or("loopback");
+    let gateway_auth_mode = config.gateway_auth_mode.as_deref().unwrap_or("token");
+    let tailscale_mode = config.tailscale_mode.as_deref().unwrap_or("off");
 
-    // Get remote home directory
     let remote_home = execute_ssh(&remote, "echo $HOME")?.trim().to_string();
 
-    // NEW: Build agents.entries section for multi-agent support
-    let agents_entries_section = if let Some(agents) = &config.agents {
-        let mut entries = serde_json::Map::new();
+    let mut agents_list = vec![serde_json::json!({ "id": "main" })];
+    if let Some(agents) = &config.agents {
         for agent in agents {
-            let mut agent_entry = serde_json::Map::new();
-            agent_entry.insert("name".to_string(), serde_json::Value::String(agent.name.clone()));
-            agent_entry.insert("workspace".to_string(), serde_json::Value::String(format!("{}/.openclaw/agents/{}/workspace", remote_home, agent.id)));
-
-            let mut model_obj = serde_json::Map::new();
-            model_obj.insert("primary".to_string(), serde_json::Value::String(agent.model.clone()));
-            if let Some(fallbacks) = &agent.fallback_models {
-                if !fallbacks.is_empty() {
-                    model_obj.insert("fallbacks".to_string(), serde_json::to_value(fallbacks).unwrap());
-                }
-            }
-            agent_entry.insert("model".to_string(), serde_json::Value::Object(model_obj));
-
-            if let Some(skills) = &agent.skills {
-                agent_entry.insert("skills".to_string(), serde_json::to_value(skills).unwrap());
-            }
-
-            entries.insert(agent.id.clone(), serde_json::Value::Object(agent_entry));
+            agents_list.push(serde_json::json!({
+                "id": agent.id,
+                "name": agent.name,
+                "workspace": format!("{}/.openclaw/agents/{}/workspace", remote_home, agent.id),
+                "agentDir": format!("{}/.openclaw/agents/{}/agent", remote_home, agent.id)
+            }));
         }
-        format!(r#","entries": {}"#, serde_json::to_string(&entries).unwrap())
-    } else {
-        String::new()
-    };
+    }
 
-    // Build complete config JSON with ALL sections
     let config_json = format!(r#"{{
   "messages": {{
     "ackReactionScope": "group-mentions"
@@ -1121,8 +982,9 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
       }},
       "models": {{
         "{model}": {{}}
-      }}{heartbeat}
-    }}{agents_entries}
+      }}{heartbeat}{sandbox}{tools}
+    }},
+    "list": {agents_list}
   }},
   "gateway": {{
     "mode": "local",
@@ -1144,13 +1006,15 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         "mode": "{mode}"
       }}
     }}
-  }}{telegram}{sandbox}{tools}
+  }}{telegram}
 }}"#,
         home = remote_home,
         model = config.model,
         fallbacks = fallbacks_section,
         heartbeat = heartbeat_section,
-        agents_entries = agents_entries_section,
+        sandbox = sandbox_section,
+        tools = tools_section,
+        agents_list = serde_json::to_string(&agents_list).unwrap(),
         port = gateway_port,
         bind = gateway_bind,
         auth_mode = gateway_auth_mode,
@@ -1159,31 +1023,23 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         profile = profile_name,
         provider = config.provider,
         mode = auth_mode,
-        telegram = telegram_section,
-        sandbox = sandbox_section,
-        tools = tools_section
+        telegram = telegram_section
     );
 
-    // Create directories and write config
     let openclaw_root = format!("{}/.openclaw", remote_home);
     execute_ssh(&remote, &format!("mkdir -p {}/agents/main/agent", openclaw_root))?;
     execute_ssh(&remote, &format!("mkdir -p {}/workspace", openclaw_root))?;
 
-    // Write config file
     let write_config_cmd = format!("cat > {}/openclaw.json << 'EOF'\n{}\nEOF", openclaw_root, config_json);
     execute_ssh(&remote, &write_config_cmd)?;
 
-    // Build auth-profiles.json with service keys
     let mut profiles_map = serde_json::Map::new();
-
-    // Add primary AI profile
     let mut primary_p = serde_json::Map::new();
     primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
     primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
     primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
     profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
 
-    // Add service keys to auth-profiles
     if let Some(service_keys) = &config.service_keys {
         for (sid, key) in service_keys {
             let mut p = serde_json::Map::new();
@@ -1207,7 +1063,6 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     let write_auth_cmd = format!("cat > {}/agents/main/agent/auth-profiles.json << 'EOF'\n{}\nEOF", openclaw_root, auth_profiles);
     execute_ssh(&remote, &write_auth_cmd)?;
 
-    // Write workspace files (use custom content if provided)
     let identity_md = config.identity_md.unwrap_or_else(|| {
         format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
@@ -1235,19 +1090,16 @@ Serve {}."#, config.user_name)
     let write_soul_cmd = format!("cat > {}/workspace/SOUL.md << 'EOF'\n{}\nEOF", openclaw_root, soul_md);
     execute_ssh(&remote, &write_soul_cmd)?;
 
-    // Set node manager if specified
     if let Some(nm) = config.node_manager {
         let _ = execute_ssh(&remote, &format!("openclaw config set skills.nodeManager {}", nm));
     }
 
-    // Enable telegram plugin if token is provided
     if let Some(ref token) = config.telegram_token {
         if !token.is_empty() {
             let _ = execute_ssh(&remote, "openclaw plugins enable telegram");
         }
     }
 
-    // Multi-agent support (if configured)
     if let Some(agents) = &config.agents {
         for agent in agents {
             let agent_workspace = format!("{}/.openclaw/agents/{}/workspace", remote_home, agent.id);
@@ -1256,7 +1108,6 @@ Serve {}."#, config.user_name)
             execute_ssh(&remote, &format!("mkdir -p {}", agent_workspace))?;
             execute_ssh(&remote, &format!("mkdir -p {}", agent_config_dir))?;
 
-            // Write agent-specific workspace files
             let agent_identity = agent.identity_md.clone().unwrap_or_else(|| {
                 format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
@@ -1280,15 +1131,13 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
             let write_cmd = format!("cat > {}/SOUL.md << 'EOF'\n{}\nEOF", agent_workspace, agent_soul_md);
             execute_ssh(&remote, &write_cmd)?;
 
-            // Create agent-specific auth-profiles.json
             let mut agent_profiles_map = serde_json::Map::new();
-            let mut primary_p = serde_json::Map::new();
-            primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
-            primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
-            primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
-            agent_profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
+            let mut primary_ai = serde_json::Map::new();
+            primary_ai.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
+            primary_ai.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
+            primary_ai.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+            agent_profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_ai));
 
-            // Add service keys to agent profile
             if let Some(service_keys) = &config.service_keys {
                 for (sid, key) in service_keys {
                     let mut p = serde_json::Map::new();
@@ -1314,16 +1163,13 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
         }
     }
 
-    // Install and start gateway
     execute_ssh(&remote, "openclaw gateway install --force")?;
     execute_ssh(&remote, "openclaw gateway start")?;
 
-    // Wait and verify gateway is running
     thread::sleep(Duration::from_secs(5));
 
-    // Verify gateway is actually running
     let mut attempts = 0;
-    let max_attempts = 20;
+    let max_attempts = 20; 
     let gateway_ready = loop {
         let status_output = execute_ssh(&remote, "openclaw gateway status");
 
@@ -1357,11 +1203,8 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
         ));
     }
 
-    // Verify gateway is listening on configured port (more robust check)
     let port_check = execute_ssh(&remote, &format!("netstat -tln | grep :{} || ss -tln | grep :{} || lsof -i :{} 2>/dev/null", gateway_port, gateway_port, gateway_port));
     if port_check.is_err() || port_check.unwrap().trim().is_empty() {
-        // If we can't verify via port check but status says it's running, we'll give it the benefit of the doubt
-        // as some systems lack these tools.
         let status = execute_ssh(&remote, "openclaw gateway status").unwrap_or_default().to_lowercase();
         let is_running = status.contains("running") || 
                          status.contains("active") || 
@@ -1380,15 +1223,12 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
 
 #[command]
 fn start_ssh_tunnel(remote: RemoteInfo) -> Result<String, String> {
-    // Check if tunnel is already running
     if TUNNEL_RUNNING.load(Ordering::Relaxed) {
         return Err("SSH tunnel is already running".to_string());
     }
 
-    // Mark tunnel as running
     TUNNEL_RUNNING.store(true, Ordering::Relaxed);
 
-    // Spawn background thread for tunnel
     thread::spawn(move || {
         if let Err(e) = run_tunnel(&remote) {
             eprintln!("SSH tunnel error: {}", e);
@@ -1396,10 +1236,8 @@ fn start_ssh_tunnel(remote: RemoteInfo) -> Result<String, String> {
         }
     });
 
-    // Give it a moment to establish
     thread::sleep(Duration::from_secs(2));
 
-    // Verify local port is listening
     if TcpStream::connect("127.0.0.1:18789").is_ok() {
         Ok("SSH tunnel established successfully".to_string())
     } else {
@@ -1408,7 +1246,6 @@ fn start_ssh_tunnel(remote: RemoteInfo) -> Result<String, String> {
 }
 
 fn run_tunnel(remote: &RemoteInfo) -> Result<(), String> {
-    // Create local listener on port 18789
     let listener = TcpListener::bind("127.0.0.1:18789")
         .map_err(|e| format!("Failed to bind local port 18789: {}", e))?;
 
@@ -1445,7 +1282,6 @@ fn run_tunnel(remote: &RemoteInfo) -> Result<(), String> {
                         if !TUNNEL_RUNNING.load(Ordering::Relaxed) { break; }
                         let mut active = false;
 
-                        // Local -> Remote
                         match stream.read(&mut buf_local) {
                             Ok(0) => break,
                             Ok(n) => {
@@ -1465,7 +1301,6 @@ fn run_tunnel(remote: &RemoteInfo) -> Result<(), String> {
                             Err(_) => break,
                         }
 
-                        // Remote -> Local
                         match remote_channel.read(&mut buf_remote) {
                             Ok(0) => break,
                             Ok(n) => {
@@ -1553,18 +1388,14 @@ fn install_remote_skill(remote: RemoteInfo, name: String) -> Result<String, Stri
 
 #[command]
 fn verify_tunnel_connectivity(remote: RemoteInfo) -> Result<bool, String> {
-    // Wait a moment for tunnel threads to initialize
     thread::sleep(Duration::from_secs(2));
 
-    // First check if local port is listening
     if TcpStream::connect("127.0.0.1:18789").is_err() {
         return Ok(false);
     }
 
-    // Try to get remote gateway token
     let token = get_remote_gateway_token(remote)?;
 
-    // Try a simple HTTP HEAD request through the tunnel
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -1579,11 +1410,7 @@ fn verify_tunnel_connectivity(remote: RemoteInfo) -> Result<bool, String> {
     }
 }
 
-// Helper to run shell commands with proper PATH (fixes macOS Tauri PATH issue)
 fn shell_command(cmd: &str) -> Result<String, String> {
-    // On macOS, GUI apps don't inherit the shell's PATH.
-    // We source common profile files and manually add common paths.
-    // We redirect ALL preamble output to /dev/null.
     let full_cmd = format!(
         "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
          {{ [ -f /etc/profile ] && . /etc/profile; \
@@ -1605,7 +1432,6 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     if output.status.success() {
         Ok(stdout)
     } else {
-        // Strip common shell preamble errors from stderr if they somehow leaked
         let cleaned_stderr = stderr.lines()
             .filter(|line| !line.contains(".zshrc") && !line.contains(".zprofile") && !line.contains("no such file or directory"))
             .collect::<Vec<_>>()
@@ -1645,7 +1471,6 @@ fn main() {
             read_workspace_files,
             save_workspace_files,
             create_custom_skill,
-            // SSH Remote Commands
             test_ssh_connection,
             check_remote_prerequisites,
             get_remote_openclaw_version,
