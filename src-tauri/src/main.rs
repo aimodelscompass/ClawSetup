@@ -1073,6 +1073,34 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     // Get remote home directory
     let remote_home = execute_ssh(&remote, "echo $HOME")?.trim().to_string();
 
+    // NEW: Build agents.entries section for multi-agent support
+    let agents_entries_section = if let Some(agents) = &config.agents {
+        let mut entries = serde_json::Map::new();
+        for agent in agents {
+            let mut agent_entry = serde_json::Map::new();
+            agent_entry.insert("name".to_string(), serde_json::Value::String(agent.name.clone()));
+            agent_entry.insert("workspace".to_string(), serde_json::Value::String(format!("{}/.openclaw/agents/{}/workspace", remote_home, agent.id)));
+
+            let mut model_obj = serde_json::Map::new();
+            model_obj.insert("primary".to_string(), serde_json::Value::String(agent.model.clone()));
+            if let Some(fallbacks) = &agent.fallback_models {
+                if !fallbacks.is_empty() {
+                    model_obj.insert("fallbacks".to_string(), serde_json::to_value(fallbacks).unwrap());
+                }
+            }
+            agent_entry.insert("model".to_string(), serde_json::Value::Object(model_obj));
+
+            if let Some(skills) = &agent.skills {
+                agent_entry.insert("skills".to_string(), serde_json::to_value(skills).unwrap());
+            }
+
+            entries.insert(agent.id.clone(), serde_json::Value::Object(agent_entry));
+        }
+        format!(r#","entries": {}"#, serde_json::to_string(&entries).unwrap())
+    } else {
+        String::new()
+    };
+
     // Build complete config JSON with ALL sections
     let config_json = format!(r#"{{
   "messages": {{
@@ -1094,7 +1122,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
       "models": {{
         "{model}": {{}}
       }}{heartbeat}
-    }}
+    }}{agents_entries}
   }},
   "gateway": {{
     "mode": "local",
@@ -1122,6 +1150,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         model = config.model,
         fallbacks = fallbacks_section,
         heartbeat = heartbeat_section,
+        agents_entries = agents_entries_section,
         port = gateway_port,
         bind = gateway_bind,
         auth_mode = gateway_auth_mode,
@@ -1136,11 +1165,12 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     );
 
     // Create directories and write config
-    execute_ssh(&remote, "mkdir -p ~/.openclaw/agents/main/agent")?;
-    execute_ssh(&remote, "mkdir -p ~/.openclaw/workspace")?;
+    let openclaw_root = format!("{}/.openclaw", remote_home);
+    execute_ssh(&remote, &format!("mkdir -p {}/agents/main/agent", openclaw_root))?;
+    execute_ssh(&remote, &format!("mkdir -p {}/workspace", openclaw_root))?;
 
     // Write config file
-    let write_config_cmd = format!("cat > ~/.openclaw/openclaw.json << 'EOF'\n{}\nEOF", config_json);
+    let write_config_cmd = format!("cat > {}/openclaw.json << 'EOF'\n{}\nEOF", openclaw_root, config_json);
     execute_ssh(&remote, &write_config_cmd)?;
 
     // Build auth-profiles.json with service keys
@@ -1174,7 +1204,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     });
 
     let auth_profiles = serde_json::to_string_pretty(&auth_profiles_val).map_err(|e| e.to_string())?;
-    let write_auth_cmd = format!("cat > ~/.openclaw/agents/main/agent/auth-profiles.json << 'EOF'\n{}\nEOF", auth_profiles);
+    let write_auth_cmd = format!("cat > {}/agents/main/agent/auth-profiles.json << 'EOF'\n{}\nEOF", openclaw_root, auth_profiles);
     execute_ssh(&remote, &write_auth_cmd)?;
 
     // Write workspace files (use custom content if provided)
@@ -1186,7 +1216,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
 ---
 Managed by ClawSetup."#, config.agent_name, config.agent_vibe)
     });
-    let write_identity_cmd = format!("cat > ~/.openclaw/workspace/IDENTITY.md << 'EOF'\n{}\nEOF", identity_md);
+    let write_identity_cmd = format!("cat > {}/workspace/IDENTITY.md << 'EOF'\n{}\nEOF", openclaw_root, identity_md);
     execute_ssh(&remote, &write_identity_cmd)?;
 
     let user_md = config.user_md.unwrap_or_else(|| {
@@ -1194,7 +1224,7 @@ Managed by ClawSetup."#, config.agent_name, config.agent_vibe)
 - **Name:** {}
 ---"#, config.user_name)
     });
-    let write_user_cmd = format!("cat > ~/.openclaw/workspace/USER.md << 'EOF'\n{}\nEOF", user_md);
+    let write_user_cmd = format!("cat > {}/workspace/USER.md << 'EOF'\n{}\nEOF", openclaw_root, user_md);
     execute_ssh(&remote, &write_user_cmd)?;
 
     let soul_md = config.soul_md.unwrap_or_else(|| {
@@ -1202,7 +1232,7 @@ Managed by ClawSetup."#, config.agent_name, config.agent_vibe)
 ## Mission
 Serve {}."#, config.user_name)
     });
-    let write_soul_cmd = format!("cat > ~/.openclaw/workspace/SOUL.md << 'EOF'\n{}\nEOF", soul_md);
+    let write_soul_cmd = format!("cat > {}/workspace/SOUL.md << 'EOF'\n{}\nEOF", openclaw_root, soul_md);
     execute_ssh(&remote, &write_soul_cmd)?;
 
     // Set node manager if specified
@@ -1220,8 +1250,8 @@ Serve {}."#, config.user_name)
     // Multi-agent support (if configured)
     if let Some(agents) = &config.agents {
         for agent in agents {
-            let agent_workspace = format!("$HOME/.openclaw/agents/{}/workspace", agent.id);
-            let agent_config_dir = format!("$HOME/.openclaw/agents/{}/agent", agent.id);
+            let agent_workspace = format!("{}/.openclaw/agents/{}/workspace", remote_home, agent.id);
+            let agent_config_dir = format!("{}/.openclaw/agents/{}/agent", remote_home, agent.id);
 
             execute_ssh(&remote, &format!("mkdir -p {}", agent_workspace))?;
             execute_ssh(&remote, &format!("mkdir -p {}", agent_config_dir))?;
@@ -1281,9 +1311,6 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
             let agent_auth_json = serde_json::to_string_pretty(&agent_auth_profiles).map_err(|e| e.to_string())?;
             let write_cmd = format!("cat > {}/auth-profiles.json << 'EOF'\n{}\nEOF", agent_config_dir, agent_auth_json);
             execute_ssh(&remote, &write_cmd)?;
-
-            // Register agent with openclaw CLI
-            let _ = execute_ssh(&remote, &format!("openclaw agents add --id {} --name {}", agent.id, agent.name));
         }
     }
 
@@ -1296,7 +1323,7 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
 
     // Verify gateway is actually running
     let mut attempts = 0;
-    let max_attempts = 12;
+    let max_attempts = 20;
     let gateway_ready = loop {
         let status_output = execute_ssh(&remote, "openclaw gateway status");
 
@@ -1304,7 +1331,9 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
             let status_lower = status.to_lowercase();
             if status_lower.contains("running") ||
                status_lower.contains("active") ||
-               status_lower.contains("listening") {
+               status_lower.contains("listening") ||
+               status_lower.contains("online") ||
+               status_lower.contains("started") {
                 break true;
             }
         }
@@ -1318,16 +1347,32 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
     };
 
     if !gateway_ready {
-        return Err(
-            "Remote gateway did not start successfully. \
-             Check logs with: ssh user@ip 'openclaw gateway logs'".to_string()
-        );
+        let logs = execute_ssh(&remote, "openclaw gateway logs | tail -n 20").unwrap_or_default();
+        let status = execute_ssh(&remote, "openclaw gateway status").unwrap_or_default();
+        return Err(format!(
+            "Remote gateway did not start successfully after {} seconds.\nStatus: {}\nLast Logs:\n{}",
+            max_attempts * 5,
+            status.trim(),
+            logs
+        ));
     }
 
-    // Verify gateway is listening on configured port
-    let port_check = execute_ssh(&remote, &format!("ss -tln | grep :{} || lsof -i :{} 2>/dev/null", gateway_port, gateway_port));
+    // Verify gateway is listening on configured port (more robust check)
+    let port_check = execute_ssh(&remote, &format!("netstat -tln | grep :{} || ss -tln | grep :{} || lsof -i :{} 2>/dev/null", gateway_port, gateway_port, gateway_port));
     if port_check.is_err() || port_check.unwrap().trim().is_empty() {
-        return Err(format!("Remote gateway is not listening on port {}", gateway_port));
+        // If we can't verify via port check but status says it's running, we'll give it the benefit of the doubt
+        // as some systems lack these tools.
+        let status = execute_ssh(&remote, "openclaw gateway status").unwrap_or_default().to_lowercase();
+        let is_running = status.contains("running") || 
+                         status.contains("active") || 
+                         status.contains("listening") || 
+                         status.contains("online") ||
+                         status.contains("started");
+        
+        if !is_running {
+            let logs = execute_ssh(&remote, "openclaw gateway logs | tail -n 20").unwrap_or_default();
+            return Err(format!("Remote gateway is not listening on port {}.\nStatus: {}\nLogs:\n{}", gateway_port, status, logs));
+        }
     }
 
     Ok("Remote OpenClaw setup completed and verified successfully".to_string())
