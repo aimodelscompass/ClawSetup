@@ -504,6 +504,8 @@ function App() {
     setError(false);
     setProgress("Starting setup...");
 
+    const mappedSandboxMode = sandboxMode === "full" ? "all" : (sandboxMode === "partial" ? "non-main" : "off");
+
     try {
       if (targetEnvironment === "cloud") {
         // Remote installation flow
@@ -648,7 +650,7 @@ function App() {
             skills: selectedSkills,
             service_keys: serviceKeys,
             // NEW: Advanced settings
-            sandbox_mode: mode === "advanced" ? sandboxMode : null,
+            sandbox_mode: mode === "advanced" ? mappedSandboxMode : null,
             tools_mode: mode === "advanced" ? toolsMode : null,
             allowed_tools: mode === "advanced" && toolsMode === "allowlist" ? allowedTools : null,
             denied_tools: mode === "advanced" && toolsMode === "denylist" ? deniedTools : null,

@@ -365,7 +365,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         Some("never") => r#","heartbeat": { "enabled": false }"#.to_string(),
         Some("idle") => format!(r#","heartbeat": {{ "mode": "idle", "timeout": {} }}"#, config.idle_timeout_ms.unwrap_or(3600000)),
         Some(interval) => format!(r#","heartbeat": {{ "every": "{}" }}"#, interval),
-        None => String::new()
+        _ => String::new()
     };
 
     let fallbacks_section = if let Some(fb) = config.fallback_models.as_ref() {
@@ -379,7 +379,8 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     };
 
     let sandbox_section = if let Some(mode) = config.sandbox_mode.as_ref() {
-        format!(r#","sandbox": {{ "mode": "{}" }}"#, mode)
+        let mapped = if mode == "full" { "all" } else if mode == "partial" { "non-main" } else if mode == "none" { "off" } else { mode };
+        format!(r#","sandbox": {{ "mode": "{}" }}"#, mapped)
     } else {
         String::new()
     };
@@ -388,20 +389,27 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         match mode.as_str() {
             "allowlist" => {
                 if let Some(tools) = config.allowed_tools.as_ref() {
-                    format!(r#","tools": {{ "allow": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","allow": {}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             "denylist" => {
                 if let Some(tools) = config.denied_tools.as_ref() {
-                    format!(r#","tools": {{ "deny": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","deny": {}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             _ => String::new()
         }
+    } else {
+        String::new()
+    };
+
+    let tools_block = if !tools_section.is_empty() {
+        format!(r#",
+  "tools": {{ {} }}"#, tools_section)
     } else {
         String::new()
     };
@@ -470,7 +478,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
       }},
       "models": {{
         "{model}": {{}}
-      }}{heartbeat}{sandbox}{tools}
+      }}{heartbeat}{sandbox}
     }},
     "list": {agents_list}
   }},
@@ -494,14 +502,14 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         "mode": "{mode}"
       }}
     }}
-  }}{telegram}
+  }}{telegram}{tools_block}
 }}"#,
         workspace = workspace.to_string_lossy(),
         model = config.model,
         fallbacks = fallbacks_section,
         heartbeat = heartbeat_section,
         sandbox = sandbox_section,
-        tools = tools_section,
+        tools_block = tools_block,
         agents_list = serde_json::to_string(&agents_list).unwrap(),
         port = gateway_port,
         bind = gateway_bind,
@@ -875,7 +883,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         Some("never") => r#","heartbeat": { "enabled": false }"#.to_string(),
         Some("idle") => format!(r#","heartbeat": {{ "mode": "idle", "timeout": {} }}"#, config.idle_timeout_ms.unwrap_or(3600000)),
         Some(interval) => format!(r#","heartbeat": {{ "every": "{}" }}"#, interval),
-        None => String::new()
+        _ => String::new()
     };
 
     let fallbacks_section = if let Some(fb) = config.fallback_models.as_ref() {
@@ -889,7 +897,8 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     };
 
     let sandbox_section = if let Some(mode) = config.sandbox_mode.as_ref() {
-        format!(r#","sandbox": {{ "mode": "{}" }}"#, mode)
+        let mapped = if mode == "full" { "all" } else if mode == "partial" { "non-main" } else if mode == "none" { "off" } else { mode };
+        format!(r#","sandbox": {{ "mode": "{}" }}"#, mapped)
     } else {
         String::new()
     };
@@ -898,20 +907,27 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         match mode.as_str() {
             "allowlist" => {
                 if let Some(tools) = config.allowed_tools.as_ref() {
-                    format!(r#","tools": {{ "allow": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","allow": {}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             "denylist" => {
                 if let Some(tools) = config.denied_tools.as_ref() {
-                    format!(r#","tools": {{ "deny": {} }}"#, serde_json::to_string(tools).unwrap())
+                    format!(r#","deny": {}"#, serde_json::to_string(tools).unwrap())
                 } else {
                     String::new()
                 }
             },
             _ => String::new()
         }
+    } else {
+        String::new()
+    };
+
+    let tools_block = if !tools_section.is_empty() {
+        format!(r#",
+  "tools": {{ {} }}"#, tools_section)
     } else {
         String::new()
     };
@@ -982,7 +998,7 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
       }},
       "models": {{
         "{model}": {{}}
-      }}{heartbeat}{sandbox}{tools}
+      }}{heartbeat}{sandbox}
     }},
     "list": {agents_list}
   }},
@@ -1006,14 +1022,14 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         "mode": "{mode}"
       }}
     }}
-  }}{telegram}
+  }}{telegram}{tools_block}
 }}"#,
         home = remote_home,
         model = config.model,
         fallbacks = fallbacks_section,
         heartbeat = heartbeat_section,
         sandbox = sandbox_section,
-        tools = tools_section,
+        tools_block = tools_block,
         agents_list = serde_json::to_string(&agents_list).unwrap(),
         port = gateway_port,
         bind = gateway_bind,
