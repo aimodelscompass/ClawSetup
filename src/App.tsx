@@ -5,28 +5,25 @@ import { open as openDialog } from "@tauri-apps/api/dialog";
 import "./App.css";
 
 const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string }>> = {
-  anthropic: [
+  "anthropic": [
     { value: "anthropic/claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet (Latest)" },
     { value: "anthropic/claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet (2025-02-19)" },
     { value: "anthropic/claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" },
     { value: "anthropic/claude-3-5-haiku-latest", label: "Claude 3.5 Haiku" },
     { value: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "anthropic/claude-opus-4-5", label: "Claude Opus 4.5" },
-    { value: "anthropic/claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
     { value: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
     { value: "anthropic/claude-3-opus-20240229", label: "Claude 3 Opus" },
   ],
-  openai: [
+  "openai": [
     { value: "openai/gpt-4o", label: "GPT-4o" },
     { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
     { value: "openai/gpt-5", label: "GPT-5" },
-    { value: "openai/gpt-5-pro", label: "GPT-5 Pro" },
     { value: "openai/o1", label: "o1" },
     { value: "openai/o3-mini", label: "o3-mini" },
     { value: "openai/o4-mini", label: "o4-mini" },
     { value: "openai/gpt-4-turbo", label: "GPT-4 Turbo" },
   ],
-  google: [
+  "google": [
     { value: "google/gemini-2.0-flash", label: "Gemini 2.0 Flash" },
     { value: "google/gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
     { value: "google/gemini-1.5-pro", label: "Gemini 1.5 Pro" },
@@ -34,25 +31,32 @@ const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string }>
     { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
     { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
   ],
-  xai: [
+  "amazon-bedrock": [
+    { value: "amazon-bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet" },
+    { value: "amazon-bedrock/amazon.nova-premier-v1:0", label: "Amazon Nova Premier" },
+    { value: "amazon-bedrock/amazon.nova-pro-v1:0", label: "Amazon Nova Pro" },
+    { value: "amazon-bedrock/deepseek.r1-v1:0", label: "DeepSeek R1" },
+    { value: "amazon-bedrock/meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" },
+  ],
+  "xai": [
     { value: "xai/grok-3", label: "Grok-3" },
     { value: "xai/grok-3-mini", label: "Grok-3 Mini" },
     { value: "xai/grok-4", label: "Grok-4" },
     { value: "xai/grok-2-latest", label: "Grok-2" },
   ],
-  mistral: [
+  "mistral": [
     { value: "mistral/mistral-large-latest", label: "Mistral Large" },
     { value: "mistral/mistral-medium-latest", label: "Mistral Medium" },
     { value: "mistral/codestral-latest", label: "Codestral" },
     { value: "mistral/pixtral-12b", label: "Pixtral 12B" },
     { value: "mistral/mistral-nemo", label: "Mistral Nemo" },
   ],
-  groq: [
+  "groq": [
     { value: "groq/llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
     { value: "groq/deepseek-r1-distill-llama-70b", label: "DeepSeek R1 70B" },
     { value: "groq/llama-3.1-8b-instant", label: "Llama 3.1 8B" },
   ],
-  openrouter: [
+  "openrouter": [
     { value: "openrouter/auto", label: "Auto (Best for Task)" },
     { value: "openrouter/anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
     { value: "openrouter/openai/gpt-4o", label: "GPT-4o" },
@@ -61,14 +65,54 @@ const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string }>
     { value: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
     { value: "openrouter/x-ai/grok-3", label: "Grok-3" },
   ],
-  deepseek: [
+  "deepseek": [
     { value: "openrouter/deepseek/deepseek-chat", label: "DeepSeek V3" },
     { value: "openrouter/deepseek/deepseek-r1", label: "DeepSeek R1" },
   ],
-  copilot: [
+  "copilot": [
     { value: "github-copilot/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
     { value: "github-copilot/gpt-4o", label: "GPT-4o" },
     { value: "github-copilot/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
+  "azure-openai-responses": [
+    { value: "azure-openai-responses/gpt-4o", label: "GPT-4o" },
+    { value: "azure-openai-responses/gpt-5", label: "GPT-5" },
+    { value: "azure-openai-responses/o3-mini", label: "o3-mini" },
+  ],
+  "google-antigravity": [
+    { value: "google-antigravity/claude-sonnet-4-5", label: "Claude 4.5 Sonnet" },
+    { value: "google-antigravity/gemini-3-pro-high", label: "Gemini 3 Pro High" },
+  ],
+  "google-gemini-cli": [
+    { value: "google-gemini-cli/gemini-3-pro-preview", label: "Gemini 3 Pro" },
+    { value: "google-gemini-cli/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
+  "google-vertex": [
+    { value: "google-vertex/gemini-2.5-pro", label: "Gemini 2.5 Pro (Vertex)" },
+    { value: "google-vertex/gemini-2.0-flash", label: "Gemini 2.0 Flash (Vertex)" },
+  ],
+  "huggingface": [
+    { value: "huggingface/deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2" },
+    { value: "huggingface/moonshotai/Kimi-K2.5", label: "Kimi K2.5" },
+  ],
+  "minimax": [
+    { value: "minimax/MiniMax-M2.1", label: "MiniMax M2.1" },
+  ],
+  "opencode": [
+    { value: "opencode/claude-opus-4-6", label: "Claude Opus 4.6 (Free)" },
+    { value: "opencode/gemini-3-pro", label: "Gemini 3 Pro (Free)" },
+    { value: "opencode/gpt-5.1", label: "GPT 5.1 (Free)" },
+  ],
+  "vercel-ai-gateway": [
+    { value: "vercel-ai-gateway/anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
+    { value: "vercel-ai-gateway/openai/gpt-4o", label: "GPT-4o" },
+  ],
+  "zai": [
+    { value: "zai/glm-4.7", label: "GLM 4.7" },
+    { value: "zai/glm-4.6", label: "GLM 4.6" },
+  ],
+  "ollama": [
+    { value: "ollama/llama3.1", label: "Llama 3.1 (Local)" },
   ]
 };
 
@@ -1138,20 +1182,24 @@ function App() {
                   setModel(MODELS_BY_PROVIDER[p][0].value);
                 }
               }}>
+                {/* Always show core providers first */}
                 <option value="anthropic">Anthropic</option>
                 <option value="openai">OpenAI</option>
                 <option value="google">Google Gemini</option>
                 <option value="openrouter">OpenRouter</option>
+                
+                {/* Dynamically show all other providers from our comprehensive list */}
+                {Object.keys(MODELS_BY_PROVIDER)
+                  .filter(p => !["anthropic", "openai", "google", "openrouter", "ollama"].includes(p))
+                  .sort()
+                  .map(p => (
+                    <option key={p} value={p}>
+                      {p.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                    </option>
+                  ))
+                }
+                
                 <option value="ollama">Ollama (Local)</option>
-                {mode === "advanced" && (
-                  <>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="xai">xAI (Grok)</option>
-                    <option value="mistral">Mistral</option>
-                    <option value="groq">Groq</option>
-                    <option value="copilot">Copilot</option>
-                  </>
-                )}
               </select>
             </div>
             
