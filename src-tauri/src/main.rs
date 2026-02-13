@@ -384,7 +384,12 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     }
 
     if !has_main {
-        agents_list.insert(0, serde_json::json!({ "id": "main" }));
+        agents_list.insert(0, serde_json::json!({
+            "id": "main",
+            "name": config.agent_name,
+            "workspace": format!("{}/.openclaw/workspace", home.to_string_lossy()),
+            "agentDir": format!("{}/.openclaw/agents/main/agent", home.to_string_lossy())
+        }));
     }
 
     let mut config_json = serde_json::json!({
@@ -856,7 +861,12 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
     }
 
     if !has_main {
-        agents_list.insert(0, serde_json::json!({ "id": "main" }));
+        agents_list.insert(0, serde_json::json!({
+            "id": "main",
+            "name": config.agent_name,
+            "workspace": format!("{}/.openclaw/workspace", remote_home),
+            "agentDir": format!("{}/.openclaw/agents/main/agent", remote_home)
+        }));
     }
 
     let mut config_json_obj = serde_json::json!({
