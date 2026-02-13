@@ -404,9 +404,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
                 "model": {
                     "primary": config.model
                 },
-                "models": {
-                    config.model.clone(): {}
-                }
+                "models": {}
             },
             "list": agents_list
         },
@@ -424,20 +422,33 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
             }
         },
         "auth": {
-            "profiles": {
-                profile_name.clone(): {
-                    "provider": config.provider,
-                    "mode": auth_mode
-                }
-            }
+            "profiles": {}
         }
     });
 
-    // Add optional fields safely
+    // Insert dynamic auth profile
+    if let Some(profiles) = config_json.get_mut("auth").and_then(|a| a.get_mut("profiles")).and_then(|p| p.as_object_mut()) {
+        profiles.insert(profile_name.clone(), serde_json::json!({
+            "provider": config.provider,
+            "mode": auth_mode
+        }));
+    }
+
+    // Insert dynamic model key and optional fields
     if let Some(defaults) = config_json.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
+        // Initialize dynamic model entry
+        if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
+            models.insert(config.model.clone(), serde_json::json!({}));
+        }
+
+        // Correctly place fallbacks under the specific model configuration
         if let Some(fb) = config.fallback_models.as_ref() {
             if !fb.is_empty() {
-                defaults.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+                if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
+                    if let Some(primary_model_config) = models.get_mut(&config.model).and_then(|m| m.as_object_mut()) {
+                        primary_model_config.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+                    }
+                }
             }
         }
         
@@ -887,19 +898,32 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
             }
         },
         "auth": {
-            "profiles": {
-                profile_name.clone(): {
-                    "provider": config.provider,
-                    "mode": auth_mode
-                }
-            }
+            "profiles": {}
         }
     });
 
+    // Insert dynamic auth profile
+    if let Some(profiles) = config_json_obj.get_mut("auth").and_then(|a| a.get_mut("profiles")).and_then(|p| p.as_object_mut()) {
+        profiles.insert(profile_name.clone(), serde_json::json!({
+            "provider": config.provider,
+            "mode": auth_mode
+        }));
+    }
+
     if let Some(defaults) = config_json_obj.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
+        // Initialize dynamic model entry
+        if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
+            models.insert(config.model.clone(), serde_json::json!({}));
+        }
+
+        // Correctly place fallbacks under the specific model configuration
         if let Some(fb) = config.fallback_models.as_ref() {
             if !fb.is_empty() {
-                defaults.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+                if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
+                    if let Some(primary_model_config) = models.get_mut(&config.model).and_then(|m| m.as_object_mut()) {
+                        primary_model_config.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+                    }
+                }
             }
         }
         
