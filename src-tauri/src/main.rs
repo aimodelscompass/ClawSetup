@@ -421,9 +421,14 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     let gateway_auth_mode = config.gateway_auth_mode.as_deref().unwrap_or("token");
     let tailscale_mode = config.tailscale_mode.as_deref().unwrap_or("off");
 
-    let mut agents_list = vec![serde_json::json!({ "id": "main" })];
+    let mut agents_list = Vec::new();
+    let mut has_main = false;
+
     if let Some(agents) = &config.agents {
         for agent in agents {
+            if agent.id == "main" {
+                has_main = true;
+            }
             agents_list.push(serde_json::json!({
                 "id": agent.id,
                 "name": agent.name,
@@ -433,68 +438,111 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         }
     }
 
-    let config_json_raw = format!(r#"{{
-  "messages": {{
-    "ackReactionScope": "group-mentions"
-  }},
-  "agents": {{
-    "defaults": {{
-      "maxConcurrent": 4,
-      "subagents": {{
-        "maxConcurrent": 8
-      }},
-      "compaction": {{
-        "mode": "safeguard"
-      }},
-      "workspace": "{workspace}",
-      "model": {{
-        "primary": "{model}"{fallbacks}
-      }},
-      "models": {{
-        "{model}": {{}}
-      }}{heartbeat}{sandbox}
-    }},
-    "list": {agents_list}
-  }},
-  "gateway": {{
-    "mode": "local",
-    "port": {port},
-    "bind": "{bind}",
-    "auth": {{
-      "mode": "{auth_mode}",
-      "token": "{token}"
-    }},
-    "tailscale": {{
-      "mode": "{tailscale}",
-      "resetOnExit": false
-    }}
-  }},
-  "auth": {{
-    "profiles": {{
-      "{profile}": {{
-        "provider": "{provider}",
-        "mode": "{mode}"
-      }}
-    }}
-  }}{telegram}{tools_block}
-}}"#,
-        workspace = workspace.to_string_lossy(),
-        model = config.model,
-        fallbacks = fallbacks_section,
-        heartbeat = heartbeat_section,
-        sandbox = sandbox_section,
-        tools_block = tools_block,
-        agents_list = serde_json::to_string(&agents_list).unwrap(),
-        port = gateway_port,
-        bind = gateway_bind,
-        auth_mode = gateway_auth_mode,
-        token = gateway_token,
-        tailscale = tailscale_mode,
-        profile = profile_name,
-        provider = config.provider,
-        mode = auth_mode,
-        telegram = telegram_section
-    );
+    if !has_main {
+        agents_list.insert(0, serde_json::json!({ "id": "main" }));
+    }
+
+    let mut config_json = serde_json::json!({
+        "messages": {
+            "ackReactionScope": "group-mentions"
+        },
+        "agents": {
+            "defaults": {
+                "maxConcurrent": 4,
+                "subagents": {
+                    "maxConcurrent": 8
+                },
+                "compaction": {
+                    "mode": "safeguard"
+                },
+                "workspace": workspace.to_string_lossy(),
+                "model": {
+                    "primary": config.model
+                },
+                "models": {
+                    config.model.clone(): {}
+                }
+            },
+            "list": agents_list
+        },
+        "gateway": {
+            "mode": "local",
+            "port": gateway_port,
+            "bind": gateway_bind,
+            "auth": {
+                "mode": gateway_auth_mode,
+                "token": gateway_token
+            },
+            "tailscale": {
+                "mode": tailscale_mode,
+                "resetOnExit": false
+            }
+        },
+        "auth": {
+            "profiles": {
+                profile_name: {
+                    "provider": config.provider,
+                    "mode": auth_mode
+                }
+            }
+        }
+    });
+
+    // Add optional fields safely
+    if let Some(defaults) = config_json.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
+        if let Some(fb) = config.fallback_models.as_ref() {
+            if !fb.is_empty() {
+                defaults.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+            }
+        }
+        
+        if let Some(hb_mode) = config.heartbeat_mode.as_deref() {
+            match hb_mode {
+                "never" => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ "enabled": false }));
+                },
+                "idle" => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ 
+                        "mode": "idle", 
+                        "timeout": config.idle_timeout_ms.unwrap_or(3600000) 
+                    }));
+                },
+                interval => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ "every": interval }));
+                }
+            }
+        }
+        
+        if let Some(sb_mode) = config.sandbox_mode.as_deref() {
+            let mapped = if sb_mode == "full" { "all" } else if sb_mode == "partial" { "non-main" } else if sb_mode == "none" { "off" } else { sb_mode };
+            defaults.insert("sandbox".to_string(), serde_json::json!({ "mode": mapped }));
+        }
+    }
+
+    if let Some(obj) = config_json.as_object_mut() {
+        // Add tools config
+        if let Some(tm) = config.tools_mode.as_deref() {
+            let mut tools_obj = serde_json::Map::new();
+            match tm {
+                "allowlist" => {
+                    if let Some(tools) = config.allowed_tools.as_ref() {
+                        tools_obj.insert("allow".to_string(), serde_json::to_value(tools).unwrap());
+                    }
+                },
+                "denylist" => {
+                    if let Some(tools) = config.denied_tools.as_ref() {
+                        tools_obj.insert("deny".to_string(), serde_json::to_value(tools).unwrap());
+                    }
+                },
+                _ => {}
+            }
+            if !tools_obj.is_empty() {
+                obj.insert("tools".to_string(), serde_json::Value::Object(tools_obj));
+            }
+        }
+    }
+
+    let config_json_raw = serde_json::to_string_pretty(&config_json).map_err(|e| e.to_string())?;
 
     fs::write(openclaw_root.join("openclaw.json"), config_json_raw).map_err(|e| e.to_string())?;
 
@@ -891,9 +939,14 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
 
     let remote_home = execute_ssh(&remote, "echo $HOME")?.trim().to_string();
 
-    let mut agents_list = vec![serde_json::json!({ "id": "main" })];
+    let mut agents_list = Vec::new();
+    let mut has_main = false;
+
     if let Some(agents) = &config.agents {
         for agent in agents {
+            if agent.id == "main" {
+                has_main = true;
+            }
             agents_list.push(serde_json::json!({
                 "id": agent.id,
                 "name": agent.name,
@@ -903,68 +956,109 @@ fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<Stri
         }
     }
 
-    let config_json = format!(r#"{{
-  "messages": {{
-    "ackReactionScope": "group-mentions"
-  }},
-  "agents": {{
-    "defaults": {{
-      "maxConcurrent": 4,
-      "subagents": {{
-        "maxConcurrent": 8
-      }},
-      "compaction": {{
-        "mode": "safeguard"
-      }},
-      "workspace": "{home}/.openclaw/workspace",
-      "model": {{
-        "primary": "{model}"{fallbacks}
-      }},
-      "models": {{
-        "{model}": {{}}
-      }}{heartbeat}{sandbox}
-    }},
-    "list": {agents_list}
-  }},
-  "gateway": {{
-    "mode": "local",
-    "port": {port},
-    "bind": "{bind}",
-    "auth": {{
-      "mode": "{auth_mode}",
-      "token": "{token}"
-    }},
-    "tailscale": {{
-      "mode": "{tailscale}",
-      "resetOnExit": false
-    }}
-  }},
-  "auth": {{
-    "profiles": {{
-      "{profile}": {{
-        "provider": "{provider}",
-        "mode": "{mode}"
-      }}
-    }}
-  }}{telegram}{tools_block}
-}}"#,
-        home = remote_home,
-        model = config.model,
-        fallbacks = fallbacks_section,
-        heartbeat = heartbeat_section,
-        sandbox = sandbox_section,
-        tools_block = tools_block,
-        agents_list = serde_json::to_string(&agents_list).unwrap(),
-        port = gateway_port,
-        bind = gateway_bind,
-        auth_mode = gateway_auth_mode,
-        token = gateway_token,
-        tailscale = tailscale_mode,
-        profile = profile_name,
-        provider = config.provider,
-        mode = auth_mode,
-        telegram = telegram_section
-    );
+    if !has_main {
+        agents_list.insert(0, serde_json::json!({ "id": "main" }));
+    }
+
+    let mut config_json_obj = serde_json::json!({
+        "messages": {
+            "ackReactionScope": "group-mentions"
+        },
+        "agents": {
+            "defaults": {
+                "maxConcurrent": 4,
+                "subagents": {
+                    "maxConcurrent": 8
+                },
+                "compaction": {
+                    "mode": "safeguard"
+                },
+                "workspace": format!("{}/.openclaw/workspace", remote_home),
+                "model": {
+                    "primary": config.model
+                },
+                "models": {
+                    config.model.clone(): {}
+                }
+            },
+            "list": agents_list
+        },
+        "gateway": {
+            "mode": "local",
+            "port": gateway_port,
+            "bind": gateway_bind,
+            "auth": {
+                "mode": gateway_auth_mode,
+                "token": gateway_token
+            },
+            "tailscale": {
+                "mode": tailscale_mode,
+                "resetOnExit": false
+            }
+        },
+        "auth": {
+            "profiles": {
+                profile_name: {
+                    "provider": config.provider,
+                    "mode": auth_mode
+                }
+            }
+        }
+    });
+
+    if let Some(defaults) = config_json_obj.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
+        if let Some(fb) = config.fallback_models.as_ref() {
+            if !fb.is_empty() {
+                defaults.insert("fallbacks".to_string(), serde_json::to_value(fb).unwrap());
+            }
+        }
+        
+        if let Some(hb_mode) = config.heartbeat_mode.as_deref() {
+            match hb_mode {
+                "never" => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ "enabled": false }));
+                },
+                "idle" => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ 
+                        "mode": "idle", 
+                        "timeout": config.idle_timeout_ms.unwrap_or(3600000) 
+                    }));
+                },
+                interval => {
+                    defaults.insert("heartbeat".to_string(), serde_json::json!({ "every": interval }));
+                }
+            }
+        }
+        
+        if let Some(sb_mode) = config.sandbox_mode.as_deref() {
+            let mapped = if sb_mode == "full" { "all" } else if sb_mode == "partial" { "non-main" } else if sb_mode == "none" { "off" } else { sb_mode };
+            defaults.insert("sandbox".to_string(), serde_json::json!({ "mode": mapped }));
+        }
+    }
+
+    if let Some(obj) = config_json_obj.as_object_mut() {
+        if let Some(tm) = config.tools_mode.as_deref() {
+            let mut tools_obj = serde_json::Map::new();
+            match tm {
+                "allowlist" => {
+                    if let Some(tools) = config.allowed_tools.as_ref() {
+                        tools_obj.insert("allow".to_string(), serde_json::to_value(tools).unwrap());
+                    }
+                },
+                "denylist" => {
+                    if let Some(tools) = config.denied_tools.as_ref() {
+                        tools_obj.insert("deny".to_string(), serde_json::to_value(tools).unwrap());
+                    }
+                },
+                _ => {}
+            }
+            if !tools_obj.is_empty() {
+                obj.insert("tools".to_string(), serde_json::Value::Object(tools_obj));
+            }
+        }
+    }
+
+    let config_json = serde_json::to_string_pretty(&config_json_obj).map_err(|e| e.to_string())?;
 
     let openclaw_root = format!("{}/.openclaw", remote_home);
     execute_ssh(&remote, &format!("mkdir -p {}/agents/main/agent", openclaw_root))?;
