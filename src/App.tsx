@@ -241,7 +241,7 @@ function RadioCard({
                    marginRight: "10px", 
                    borderRadius: "6px",
                    objectFit: "contain",
-                   backgroundColor: "rgba(255,255,255,0.1)",
+                   backgroundColor: "white",
                    padding: "2px"
                  }} 
                />
