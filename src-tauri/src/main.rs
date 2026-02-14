@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 use std::net::{TcpStream, TcpListener};
 use std::io::{Read, Write};
+<<<<<<< HEAD
 use std::sync::atomic::{AtomicBool, Ordering};
 use rand::Rng;
 use ssh2::Session;
@@ -28,6 +29,16 @@ struct AgentData {
     identity_md: Option<String>,
     user_md: Option<String>,
     soul_md: Option<String>,
+=======
+use rand::Rng;
+use ssh2::Session;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+lazy_static::lazy_static! {
+    static ref TUNNEL_RUNNING: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+>>>>>>> origin/main
 }
 
 #[derive(serde::Deserialize)]
@@ -70,6 +81,7 @@ struct PrereqCheck {
     openclaw_installed: bool,
 }
 
+<<<<<<< HEAD
 #[derive(serde::Deserialize, Clone)]
 struct RemoteInfo {
     ip: String,
@@ -85,21 +97,39 @@ fn authenticate_with_key(sess: &Session, username: &str, key_path_str: &str) -> 
 
     // Strategy 1: Try with None for public key (libssh2 often handles this)
     if sess.userauth_pubkey_file(username, None, path, None).is_ok() {
+=======
+fn authenticate_with_key(sess: &Session, user: &str, key_path: &std::path::Path) -> Result<(), String> {
+    // Strategy 1: Try with None for public key (modern libssh2 often handles this)
+    if sess.userauth_pubkey_file(user, None, key_path, None).is_ok() {
+>>>>>>> origin/main
         return Ok(());
     }
 
     // Strategy 2: Try with an explicit .pub file if it exists
+<<<<<<< HEAD
     let mut pubkey_path = path.to_path_buf();
     pubkey_path.set_extension("pub");
     if pubkey_path.exists() {
         if sess.userauth_pubkey_file(username, Some(&pubkey_path), path, None).is_ok() {
+=======
+    let mut pubkey_path = key_path.to_path_buf();
+    pubkey_path.set_extension("pub");
+    if pubkey_path.exists() {
+        if sess.userauth_pubkey_file(user, Some(&pubkey_path), key_path, None).is_ok() {
+>>>>>>> origin/main
             return Ok(());
         }
     }
 
+<<<<<<< HEAD
     // Strategy 3: Try generating the public key using ssh-keygen if available
     let output = Command::new("ssh-keygen")
         .args(["-y", "-P", "", "-f", key_path_str])
+=======
+    // Strategy 3: Try generating the public key on the fly using ssh-keygen
+    let output = Command::new("ssh-keygen")
+        .args(["-y", "-P", "", "-f", &key_path.to_string_lossy()])
+>>>>>>> origin/main
         .output();
 
     if let Ok(out) = output {
@@ -109,7 +139,11 @@ fn authenticate_with_key(sess: &Session, username: &str, key_path_str: &str) -> 
             let temp_pubkey = temp_dir.join(format!("temp_ssh_key_{}.pub", rand::random::<u32>()));
             
             if fs::write(&temp_pubkey, pubkey_content.as_bytes()).is_ok() {
+<<<<<<< HEAD
                 let res = sess.userauth_pubkey_file(username, Some(&temp_pubkey), path, None);
+=======
+                let res = sess.userauth_pubkey_file(user, Some(&temp_pubkey), key_path, None);
+>>>>>>> origin/main
                 let _ = fs::remove_file(temp_pubkey);
                 if res.is_ok() {
                     return Ok(());
@@ -118,11 +152,95 @@ fn authenticate_with_key(sess: &Session, username: &str, key_path_str: &str) -> 
         }
     }
 
+<<<<<<< HEAD
     Err("Public key authentication failed. Please ensure your key is in OpenSSH format and not passphrase-protected.".to_string())
+=======
+    // If all failed, return a informative error
+    Err("Key authentication failed. libssh2 reported an error. Please ensure the key is a valid OpenSSH format, matches the remote user, and is not passphrase-protected.".to_string())
+}
+
+#[command]
+async fn test_ssh_connection(ip: String, user: String, password: Option<String>, private_key_path: Option<String>) -> Result<String, String> {
+    use std::net::ToSocketAddrs;
+
+    // 1. Check network connectivity by trying to connect to port 22
+    // Ping is unreliable as many servers/firewalls block ICMP
+    let addr = format!("{}:22", ip);
+    let socket_addrs = addr.to_socket_addrs().map_err(|_| "Invalid IP address or hostname format".to_string())?;
+    
+    let mut tcp = None;
+    for sa in socket_addrs {
+        if let Ok(stream) = TcpStream::connect_timeout(&sa, Duration::from_secs(5)) {
+            tcp = Some(stream);
+            break;
+        }
+    }
+
+    let tcp = tcp.ok_or_else(|| "Connectivity failed. Could not reach port 22 on the remote server. Please check the IP address and your network.".to_string())?;
+
+    // 2. Try SSH connection
+    let mut sess = Session::new().map_err(|e| e.to_string())?;
+    sess.set_tcp_stream(tcp);
+    sess.handshake().map_err(|e| format!("SSH handshake failed: {}", e))?;
+
+    // Try provided private key path if it exists
+    if let Some(ref path) = private_key_path {
+        let key_path = std::path::Path::new(path);
+        if !key_path.exists() {
+            return Err(format!("The provided private key file does not exist at: {}", path));
+        }
+        
+        // Use the improved authentication helper
+        authenticate_with_key(&sess, &user, key_path)?;
+        return Ok("connected_key".to_string());
+    }
+
+    // Try with agent first
+    if let Ok(_) = sess.userauth_agent(&user) {
+        return Ok("connected_key".to_string());
+    }
+
+    // Try with default keys
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let id_rsa = home.join(".ssh").join("id_rsa");
+    let id_ed25519 = home.join(".ssh").join("id_ed25519");
+
+    if id_rsa.exists() {
+        if let Ok(_) = sess.userauth_pubkey_file(&user, None, &id_rsa, None) {
+             return Ok("connected_key".to_string());
+        }
+    }
+    if id_ed25519.exists() {
+        if let Ok(_) = sess.userauth_pubkey_file(&user, None, &id_ed25519, None) {
+             return Ok("connected_key".to_string());
+        }
+    }
+
+    // If password provided, try it
+    if let Some(pw) = password {
+        if let Ok(_) = sess.userauth_password(&user, &pw) {
+            return Ok("connected_password".to_string());
+        } else {
+            return Err("Invalid SSH password. Please try again.".to_string());
+        }
+    }
+
+    Ok("auth_required".to_string())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteInfo {
+    ip: String,
+    user: String,
+    password: Option<String>,
+    private_key_path: Option<String>,
+>>>>>>> origin/main
 }
 
 fn connect_ssh(remote: &RemoteInfo) -> Result<Session, String> {
     let tcp = TcpStream::connect(format!("{}:22", remote.ip))
+<<<<<<< HEAD
         .map_err(|e| format!("Failed to connect to {}:22 - {}", remote.ip, e))?;
 
     let mut sess = Session::new()
@@ -140,10 +258,44 @@ fn connect_ssh(remote: &RemoteInfo) -> Result<Session, String> {
             match authenticate_with_key(&sess, &remote.user, key_path) {
                 Ok(_) => return Ok(sess),
                 Err(e) => auth_methods.push(format!("Key auth: {}", e)),
+=======
+        .map_err(|e| format!("Failed to connect to port 22: {}", e))?;
+    let mut sess = Session::new().map_err(|e| e.to_string())?;
+    sess.set_tcp_stream(tcp);
+    sess.handshake().map_err(|e| format!("SSH handshake failed: {}", e))?;
+
+    // 1. Try provided private key path if it exists
+    // If a key is explicitly provided, ONLY use that key and don't fallback
+    if let Some(ref path) = remote.private_key_path {
+        let key_path = std::path::Path::new(path);
+        if !key_path.exists() {
+            return Err(format!("The provided private key file does not exist at: {}", path));
+        }
+
+        // Use the improved authentication helper - fail if it doesn't work
+        authenticate_with_key(&sess, &remote.user, key_path)?;
+        return Ok(sess);
+    }
+
+    // 2. Try SSH agent
+    if sess.userauth_agent(&remote.user).is_ok() {
+        return Ok(sess);
+    }
+
+    // 3. Try default keys
+    if let Some(home) = dirs::home_dir() {
+        let keys = [home.join(".ssh").join("id_rsa"), home.join(".ssh").join("id_ed25519")];
+        for key in keys {
+            if key.exists() {
+                if sess.userauth_pubkey_file(&remote.user, None, &key, None).is_ok() {
+                    return Ok(sess);
+                }
+>>>>>>> origin/main
             }
         }
     }
 
+<<<<<<< HEAD
     // 2. Try password if provided
     if let Some(ref password) = remote.password {
         if !password.is_empty() {
@@ -253,6 +405,341 @@ fn create_custom_skill(name: String, content: String) -> Result<String, String> 
     fs::write(skill_dir.join("SKILL.md"), content).map_err(|e| e.to_string())?;
 
     Ok(format!("Custom skill '{}' created successfully", name))
+=======
+    // 4. Try password
+    if let Some(ref pw) = remote.password {
+        if sess.userauth_password(&remote.user, pw).is_ok() {
+            return Ok(sess);
+        }
+    }
+
+    Err("SSH Authentication failed".to_string())
+}
+
+fn execute_ssh(sess: &Session, cmd: &str) -> Result<String, String> {
+    let mut channel = sess.channel_session().map_err(|e| e.to_string())?;
+    channel.exec(cmd).map_err(|e| e.to_string())?;
+    let mut s = String::new();
+    channel.read_to_string(&mut s).map_err(|e| e.to_string())?;
+    let mut stderr = String::new();
+    channel.stderr().read_to_string(&mut stderr).map_err(|e| e.to_string())?;
+    let _ = channel.wait_close();
+    
+    if channel.exit_status().unwrap_or(0) != 0 {
+        return Err(format!("Command failed: {}\nStderr: {}", cmd, stderr));
+    }
+    Ok(s)
+}
+
+#[command]
+async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+
+    // 1. Check/Install Node.js (Ubuntu/Debian focus)
+    let node_check = execute_ssh(&sess, "node -v");
+    if node_check.is_err() {
+        // Install latest Node.js (supports Debian/Ubuntu)
+        execute_ssh(&sess, "curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash - && sudo apt-get install -y nodejs")
+            .map_err(|e| format!("Failed to install Node.js: {}", e))?;
+    }
+
+    // 2. Install OpenClaw
+    execute_ssh(&sess, "sudo npm install -g openclaw")
+        .map_err(|e| format!("Failed to install OpenClaw: {}", e))?;
+
+    // 3. Configure
+    let remote_home = execute_ssh(&sess, "echo $HOME")?.trim().to_string();
+    let openclaw_root = format!("{}/.openclaw", remote_home);
+    let workspace = format!("{}/workspace", openclaw_root);
+    let agents_dir = format!("{}/agents/main/agent", openclaw_root);
+
+    execute_ssh(&sess, &format!("mkdir -p {} && mkdir -p {}", workspace, agents_dir))?;
+
+    let gateway_token: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+
+    let profile_name = format!("{}:default", config.provider);
+    let mut auth_mode = config.auth_method.unwrap_or_else(|| "token".to_string());
+    if auth_mode == "setup-token" { auth_mode = "token".to_string(); }
+    else if auth_mode == "antigravity" || auth_mode == "gemini_cli" || auth_mode == "codex" { auth_mode = "oauth".to_string(); }
+
+    let telegram_section = if let Some(ref token) = config.telegram_token {
+        if !token.is_empty() {
+            format!(r#",
+  "plugins": {{ "entries": {{ "telegram": {{ "enabled": true }} }} }},
+  "channels": {{ "telegram": {{ "accounts": {{ "main": {{ "botToken": "{}", "name": "Primary Bot", "dmPolicy": "pairing" }} }} }} }}"#, token)
+        } else { String::new() }
+    } else { String::new() };
+
+    let gateway_port = config.gateway_port.unwrap_or(18789);
+    let gateway_bind = config.gateway_bind.unwrap_or_else(|| "loopback".to_string());
+    let gateway_auth_mode = config.gateway_auth_mode.unwrap_or_else(|| "token".to_string());
+    let tailscale_mode = config.tailscale_mode.unwrap_or_else(|| "off".to_string());
+
+    let config_json_raw = format!(r#"{{
+  "messages": {{ "ackReactionScope": "group-mentions" }},
+  "agents": {{ "defaults": {{ "maxConcurrent": 4, "subagents": {{ "maxConcurrent": 8 }}, "compaction": {{ "mode": "safeguard" }}, "workspace": "{}", "model": {{ "primary": "{}" }}, "models": {{ "{}": {{}} }} }} }},
+  "gateway": {{ "mode": "local", "port": {}, "bind": "{}", "auth": {{ "mode": "{}", "token": "{}" }}, "tailscale": {{ "mode": "{}", "resetOnExit": false }} }},
+  "auth": {{ "profiles": {{ "{}": {{ "provider": "{}", "mode": "{}" }} }} }}{}
+}}"#, workspace, config.model, config.model, gateway_port, gateway_bind, gateway_auth_mode, gateway_token, tailscale_mode, profile_name, config.provider, auth_mode, telegram_section);
+
+    // Escape single quotes for shell
+    let config_json_escaped = config_json_raw.replace("'", "'\\''");
+    execute_ssh(&sess, &format!("echo '{}' > {}/openclaw.json", config_json_escaped, openclaw_root))?;
+
+    // auth-profiles.json
+    let mut profiles_map = serde_json::Map::new();
+    let mut primary_p = serde_json::Map::new();
+    primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode));
+    primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
+    primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+    profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
+
+    if let Some(service_keys) = &config.service_keys {
+        for (sid, key) in service_keys {
+            let mut p = serde_json::Map::new();
+            p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+            p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
+            p.insert("token".to_string(), serde_json::Value::String(key.clone()));
+            profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+        }
+    }
+
+    let auth_profiles_val = serde_json::json!({ "version": 1, "profiles": profiles_map, "lastGood": { config.provider.clone(): profile_name }, "usageStats": {} });
+    let auth_profiles_json = serde_json::to_string_pretty(&auth_profiles_val).map_err(|e| e.to_string())?.replace("'", "'\\''");
+    execute_ssh(&sess, &format!("echo '{}' > {}/auth-profiles.json", auth_profiles_json, agents_dir))?;
+
+    // Identity Files
+    let identity_md = format!(r#"# IDENTITY.md - Who Am I?
+- **Name:** {}
+- **Vibe:** {}
+- **Emoji:** 🦞
+---
+Managed by ClawSetup."#, config.agent_name, config.agent_vibe).replace("'", "'\\''");
+    execute_ssh(&sess, &format!("echo '{}' > {}/IDENTITY.md", identity_md, workspace))?;
+
+    let user_md = format!(r#"# USER.md - About Your Human
+- **Name:** {}
+---"#, config.user_name).replace("'", "'\\''");
+    execute_ssh(&sess, &format!("echo '{}' > {}/USER.md", user_md, workspace))?;
+
+    let soul_md = format!(r#"# SOUL.md
+## Mission
+Serve {}."#, config.user_name).replace("'", "'\\''");
+    execute_ssh(&sess, &format!("echo '{}' > {}/SOUL.md", soul_md, workspace))?;
+
+    // Node Manager
+    if let Some(nm) = config.node_manager {
+        let _ = execute_ssh(&sess, &format!("openclaw config set skills.nodeManager {}", nm));
+    }
+
+    // Plugins
+    if let Some(ref token) = config.telegram_token {
+        if !token.is_empty() {
+            let _ = execute_ssh(&sess, "openclaw plugins enable telegram");
+        }
+    }
+
+    // Skills
+    if let Some(skills) = &config.skills {
+        for skill in skills {
+            let _ = execute_ssh(&sess, &format!("npx clawhub install {}", skill));
+        }
+    }
+
+    // Start Gateway
+    execute_ssh(&sess, "openclaw gateway stop || true")?;
+    execute_ssh(&sess, "openclaw gateway install --force")?;
+    execute_ssh(&sess, "openclaw gateway start")?;
+
+    Ok(gateway_token)
+}
+
+#[command]
+fn start_ssh_tunnel(remote: RemoteInfo, local_port: u16, remote_port: u16) -> Result<(), String> {
+    if TUNNEL_RUNNING.load(Ordering::SeqCst) {
+        return Err("Tunnel is already running".to_string());
+    }
+    
+    TUNNEL_RUNNING.store(true, Ordering::SeqCst);
+    let remote_clone = RemoteInfo {
+        ip: remote.ip.clone(),
+        user: remote.user.clone(),
+        password: remote.password.clone(),
+        private_key_path: remote.private_key_path.clone(),
+    };
+
+    thread::spawn(move || {
+        let listener = match TcpListener::bind(format!("127.0.0.1:{}", local_port)) {
+            Ok(l) => l,
+            Err(_) => {
+                TUNNEL_RUNNING.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let _ = listener.set_nonblocking(true);
+
+        while TUNNEL_RUNNING.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let remote_info = RemoteInfo {
+                        ip: remote_clone.ip.clone(),
+                        user: remote_clone.user.clone(),
+                        password: remote_clone.password.clone(),
+                        private_key_path: remote_clone.private_key_path.clone(),
+                    };
+
+                    thread::spawn(move || {
+                        let sess = match connect_ssh(&remote_info) {
+                            Ok(s) => s,
+                            Err(_) => return,
+                        };
+
+                        let mut remote_channel = match sess.channel_direct_tcpip("localhost", remote_port, None) {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
+
+                        let _ = stream.set_nonblocking(true);
+                        sess.set_blocking(false);
+
+                        let mut buf1 = [0; 16384];
+                        let mut buf2 = [0; 16384];
+
+                        loop {
+                            if !TUNNEL_RUNNING.load(Ordering::SeqCst) { break; }
+                            let mut active = false;
+
+                            match stream.read(&mut buf1) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    active = true;
+                                    let mut sent = 0;
+                                    while sent < n {
+                                        match remote_channel.write(&buf1[sent..n]) {
+                                            Ok(m) => sent += m,
+                                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                                thread::sleep(Duration::from_millis(5));
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
+                                }
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                                Err(_) => break,
+                            }
+
+                            match remote_channel.read(&mut buf2) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    active = true;
+                                    let mut sent = 0;
+                                    while sent < n {
+                                        match stream.write(&buf2[sent..n]) {
+                                            Ok(m) => sent += m,
+                                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                                thread::sleep(Duration::from_millis(5));
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
+                                }
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                                Err(_) => break,
+                            }
+
+                            if !active {
+                                thread::sleep(Duration::from_millis(10));
+                            }
+                        }
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
+        TUNNEL_RUNNING.store(false, Ordering::SeqCst);
+    });
+
+    Ok(())
+}
+
+#[command]
+fn stop_ssh_tunnel() -> Result<(), String> {
+    TUNNEL_RUNNING.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+#[command]
+async fn check_remote_prerequisites(remote: RemoteInfo) -> Result<PrereqCheck, String> {
+    let sess = connect_ssh(&remote)?;
+    let node = execute_ssh(&sess, "node -v").is_ok();
+    let openclaw = execute_ssh(&sess, "openclaw --version").is_ok();
+
+    Ok(PrereqCheck {
+        node_installed: node,
+        docker_running: true, // Not needed for OpenClaw native
+        openclaw_installed: openclaw,
+    })
+}
+
+#[command]
+async fn get_remote_openclaw_version(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    match execute_ssh(&sess, "openclaw --version") {
+        Ok(v) => Ok(v.trim().to_string()),
+        Err(_) => Ok("Not installed".to_string()),
+    }
+}
+
+#[command]
+async fn run_remote_doctor_repair(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    execute_ssh(&sess, "openclaw doctor --repair --yes")
+}
+
+#[command]
+async fn run_remote_security_audit_fix(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    execute_ssh(&sess, "openclaw security audit --fix")
+}
+
+#[command]
+async fn uninstall_remote_openclaw(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    let _ = execute_ssh(&sess, "openclaw gateway stop");
+    execute_ssh(&sess, "sudo npm uninstall -g openclaw")?;
+    execute_ssh(&sess, "rm -rf ~/.openclaw")?;
+    Ok("OpenClaw has been completely uninstalled from the remote server.".to_string())
+}
+
+#[command]
+async fn update_remote_openclaw(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    execute_ssh(&sess, "sudo npm install -g openclaw")?;
+    execute_ssh(&sess, "openclaw gateway restart")?;
+    Ok("OpenClaw has been updated on the remote server.".to_string())
+}
+
+#[command]
+async fn get_remote_gateway_token(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    
+    let token = json.get("gateway")
+        .and_then(|g| g.get("auth"))
+        .and_then(|a| a.get("token"))
+        .and_then(|t| t.as_str())
+        .ok_or("Could not find gateway token in remote config")?;
+        
+    Ok(token.to_string())
+>>>>>>> origin/main
 }
 
 #[command]
@@ -723,6 +1210,7 @@ fn generate_pairing_code() -> Result<String, String> {
 }
 
 #[command]
+<<<<<<< HEAD
 fn approve_pairing(code: String, is_remote: bool, remote: Option<RemoteInfo>) -> Result<String, String> {
     let output = if is_remote && remote.is_some() {
         execute_ssh(&remote.unwrap(), &format!("openclaw pairing approve {} --channel telegram", code))
@@ -730,6 +1218,19 @@ fn approve_pairing(code: String, is_remote: bool, remote: Option<RemoteInfo>) ->
         shell_command(&format!("openclaw pairing approve {} --channel telegram", code))
     };
 
+=======
+async fn approve_pairing(code: String, remote: Option<RemoteInfo>) -> Result<String, String> {
+    // Run: openclaw pairing approve <code> --channel telegram
+    let cmd = format!("openclaw pairing approve {} --channel telegram", code);
+    
+    let output = if let Some(r) = remote {
+        let sess = connect_ssh(&r)?;
+        execute_ssh(&sess, &cmd)
+    } else {
+        shell_command(&cmd)
+    };
+    
+>>>>>>> origin/main
     match output {
         Ok(out) => {
             let out_lower = out.to_lowercase();
@@ -1408,9 +1909,30 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     }
 }
 
+#[command]
+async fn install_local_nodejs() -> Result<String, String> {
+    // 1. Try brew
+    if shell_command("brew --version").is_ok() {
+        return shell_command("brew install node");
+    }
+
+    // 2. Try nvm (via curl)
+    // Install nvm if not present
+    let install_nvm_cmd = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash";
+    shell_command(install_nvm_cmd).map_err(|e| format!("Failed to install nvm: {}", e))?;
+    
+    // Install node via nvm (sourcing nvm.sh in the same shell session)
+    let install_node_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
+        [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
+        nvm install node && nvm alias default node";
+        
+    shell_command(install_node_cmd).map_err(|e| format!("Failed to install Node.js via nvm: {}", e))
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            install_local_nodejs,
             check_prerequisites,
             install_openclaw,
             configure_agent,
@@ -1425,6 +1947,7 @@ fn main() {
             uninstall_openclaw,
             run_doctor_repair,
             run_security_audit_fix,
+<<<<<<< HEAD
             read_workspace_files,
             save_workspace_files,
             create_custom_skill,
@@ -1434,13 +1957,24 @@ fn main() {
             setup_remote_openclaw,
             start_ssh_tunnel,
             stop_ssh_tunnel,
+=======
+            test_ssh_connection,
+            setup_remote_openclaw,
+            start_ssh_tunnel,
+            check_remote_prerequisites,
+            get_remote_openclaw_version,
+>>>>>>> origin/main
             run_remote_doctor_repair,
             run_remote_security_audit_fix,
             uninstall_remote_openclaw,
             update_remote_openclaw,
             get_remote_gateway_token,
+<<<<<<< HEAD
             install_remote_skill,
             verify_tunnel_connectivity
+=======
+            stop_ssh_tunnel
+>>>>>>> origin/main
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

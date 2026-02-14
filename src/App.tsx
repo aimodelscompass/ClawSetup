@@ -265,11 +265,21 @@ function RadioCard({
 function App() {
   const [step, setStep] = useState(0.5); // Start at Welcome page
   const [mode, setMode] = useState("basic"); // "basic" or "advanced"
+  const [setupLocation, setSetupLocation] = useState<"local" | "remote">("local");
+  const [remoteIp, setRemoteIp] = useState("");
+  const [remoteUser, setRemoteUser] = useState("");
+  const [remotePassword, setRemotePassword] = useState("");
+  const [remotePrivateKeyPath, setRemotePrivateKeyPath] = useState("");
+  const [sshStatus, setSshStatus] = useState<"idle" | "checking" | "requesting_password" | "success" | "error">("idle");
+  const [sshError, setSshError] = useState("");
+
   const [checks, setChecks] = useState({ node: false, docker: false, openclaw: false });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [logs, setLogs] = useState("");
   const [pairingCode, setPairingCode] = useState("");
+  const [installingNode, setInstallingNode] = useState(false);
+  const [nodeInstallError, setNodeInstallError] = useState("");
 
   // Form Data
   const [userName, setUserName] = useState("");
@@ -286,6 +296,7 @@ function App() {
   const [maintenanceStatus, setMaintenanceStatus] = useState("");
   const [selectedMaint, setSelectedMaint] = useState<string>("repair");
   const [maintCompleted, setMaintCompleted] = useState(false);
+  const [tunnelActive, setTunnelActive] = useState(false);
 
   // Environment selection
   const [targetEnvironment, setTargetEnvironment] = useState("local");
@@ -423,7 +434,10 @@ function App() {
 
   const stepsList = [
     { id: 0, name: "System State", hidden: true },
+<<<<<<< HEAD
     { id: 0.5, name: "Welcome", hidden: true },
+=======
+>>>>>>> origin/main
     { id: 1, name: "Environment" },
     { id: 2, name: "System Check" },
     { id: 3, name: "Security" },
@@ -435,6 +449,7 @@ function App() {
     { id: 9, name: "Channels" },
     { id: 10, name: "Runtime", advanced: true },
     { id: 11, name: "Skills", advanced: true },
+<<<<<<< HEAD
     { id: 12, name: "Security+", advanced: true },
     { id: 13, name: "Fallbacks", advanced: true },
     { id: 14, name: "Session", advanced: true },
@@ -444,6 +459,41 @@ function App() {
   ];
 
   useEffect(() => { checkSystem(true); }, []);
+=======
+    { id: 12, name: "Pairing" }
+  ];
+
+  async function installLocalNode() {
+    setInstallingNode(true);
+    setNodeInstallError("");
+    try {
+      await invoke("install_local_nodejs");
+      // Re-check prerequisites
+      const res: any = await invoke("check_prerequisites");
+      setChecks({
+        node: res.node_installed,
+        docker: res.docker_running,
+        openclaw: res.openclaw_installed
+      });
+    } catch (e) {
+      setNodeInstallError("Failed to install: " + e);
+    } finally {
+      setInstallingNode(false);
+    }
+  }
+
+  useEffect(() => { 
+    // Initial check just to see if local is already installed
+    // but we don't force step 0 yet
+    invoke("check_prerequisites").then((res: any) => {
+      setChecks({
+        node: res.node_installed,
+        docker: res.docker_running,
+        openclaw: res.openclaw_installed
+      });
+    });
+  }, []);
+>>>>>>> origin/main
 
   // Update default auth method when provider changes
   useEffect(() => {
@@ -453,6 +503,7 @@ function App() {
     else setAuthMethod("token");
   }, [provider]);
 
+<<<<<<< HEAD
   // Workspace change detection
   useEffect(() => {
     const modified =
@@ -478,6 +529,70 @@ function App() {
       return true; // Indicate that we're going to maintenance
     } else if (!skipRedirect) {
       setStep(0.5); // Go to Welcome page if not installed
+=======
+  async function checkSystem() {
+    setLoading(true);
+    try {
+      if (setupLocation === "local") {
+        const res: any = await invoke("check_prerequisites");
+        setChecks({
+          node: res.node_installed,
+          docker: res.docker_running,
+          openclaw: res.openclaw_installed
+        });
+        const version: string = await invoke("get_openclaw_version");
+        setOpenClawVersion(version);
+
+        if (res.openclaw_installed) {
+          setStep(0);
+        } else {
+          setStep(2);
+        }
+      } else {
+        // Remote check
+        const remote = { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null };
+        const res: any = await invoke("check_remote_prerequisites", { remote });
+        setChecks({
+          node: res.node_installed,
+          docker: res.docker_running,
+          openclaw: res.openclaw_installed
+        });
+        const version: string = await invoke("get_remote_openclaw_version", { remote });
+        setOpenClawVersion(version);
+
+        if (res.openclaw_installed) {
+          setStep(0);
+        } else {
+          setStep(2);
+        }
+      }
+    } catch (e) {
+      console.error("System check failed:", e);
+    }
+    setLoading(false);
+  }
+
+  async function handleSshCheck() {
+    if (!remoteIp || !remoteUser) return;
+    setSshStatus("checking");
+    setSshError("");
+    try {
+      const res: string = await invoke("test_ssh_connection", {
+        ip: remoteIp,
+        user: remoteUser,
+        password: remotePassword || null,
+        privateKeyPath: remotePrivateKeyPath || null
+      });
+
+      if (res === "auth_required") {
+        setSshStatus("requesting_password");
+      } else {
+        setSshStatus("success");
+      }
+    } catch (e: any) {
+      setSshStatus("error");
+      setSshError(e.toString());
+>>>>>>> origin/main
     }
     return res.openclaw_installed; // Return installation status
   }
@@ -639,6 +754,7 @@ function App() {
     const mappedSandboxMode = sandboxMode === "full" ? "all" : (sandboxMode === "partial" ? "non-main" : "off");
 
     try {
+<<<<<<< HEAD
       if (targetEnvironment === "cloud") {
         // Remote installation flow
         setProgress("Setting up OpenClaw on remote server...");
@@ -818,6 +934,88 @@ function App() {
           }
         }
 
+=======
+      if (setupLocation === "remote") {
+        setProgress("Connecting and installing on remote server (this may take 2-3 minutes)...");
+        setLogs("Starting remote setup...");
+        const remote = { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null };
+        const gatewayToken: string = await invoke("setup_remote_openclaw", {
+          remote,
+          config: {
+            provider,
+            api_key: apiKey,
+            auth_method: authMethod,
+            model,
+            user_name: userName,
+            agent_name: agentName,
+            agent_vibe: agentVibe,
+            telegram_token: telegramToken,
+            gateway_port: gatewayPort,
+            gateway_bind: gatewayBind,
+            gateway_auth_mode: gatewayAuthMode,
+            tailscale_mode: tailscaleMode,
+            node_manager: nodeManager,
+            skills: selectedSkills,
+            service_keys: serviceKeys
+          }
+        });
+
+        setProgress("Establishing SSH tunnel...");
+        await invoke("start_ssh_tunnel", {
+          remote,
+          localPort: 18789,
+          remotePort: gatewayPort
+        });
+
+        setDashboardUrl(`http://127.0.0.1:18789/?token=${gatewayToken}`);
+        setProgress("Finalizing...");
+        const instruction: string = await invoke("generate_pairing_code");
+        setPairingCode(instruction);
+        setStep(12);
+      } else {
+        setProgress("Installing OpenClaw (this may take a minute)...");
+        setLogs("Installing OpenClaw (this may take a minute)...");
+        if (!checks.openclaw) {
+          await invoke("install_openclaw");
+          const version: string = await invoke("get_openclaw_version");
+          setOpenClawVersion(version);
+        }
+
+        setProgress("Configuring agent...");
+        setLogs("Configuring...");
+        
+        await invoke("configure_agent", {
+          config: {
+            provider,
+            api_key: apiKey,
+            auth_method: authMethod,
+            model,
+            user_name: userName,
+            agent_name: agentName,
+            agent_vibe: agentVibe,
+            telegram_token: telegramToken,
+            gateway_port: gatewayPort,
+            gateway_bind: gatewayBind,
+            gateway_auth_mode: gatewayAuthMode,
+            tailscale_mode: tailscaleMode,
+            node_manager: nodeManager,
+            skills: selectedSkills,
+            service_keys: serviceKeys
+          }
+        });
+
+        for (const skill of selectedSkills) {
+          setProgress(`Installing skill: ${skill}...`);
+          setLogs(`Installing skill: ${skill}...`);
+          try {
+            await invoke("install_skill", { name: skill });
+          } catch (e) {
+            console.error(`Failed to install skill ${skill}:`, e);
+            setLogs(prev => prev + `\nWarning: Failed to install skill ${skill}: ${e}`);
+          }
+        }
+
+>>>>>>> origin/main
         setProgress("Starting Gateway (this may take 20-30 seconds)...");
         setLogs("Starting Gateway...");
         await invoke("start_gateway");
@@ -826,6 +1024,7 @@ function App() {
         const instruction: string = await invoke("generate_pairing_code");
         setPairingCode(instruction);
 
+<<<<<<< HEAD
         const url: string = await invoke("get_dashboard_url", {
           isRemote: false,
           remote: null
@@ -834,6 +1033,13 @@ function App() {
 
         setProgress("");
         setStep(17);
+=======
+        const url: string = await invoke("get_dashboard_url");
+        setDashboardUrl(url);
+
+        setProgress("");
+        setStep(11);
+>>>>>>> origin/main
       }
     } catch (e) {
       setProgress("");
@@ -847,6 +1053,7 @@ function App() {
     if (!pairingInput) return;
     setPairingStatus("Verifying...");
     try {
+<<<<<<< HEAD
       const remoteConfig = targetEnvironment === "cloud" ? {
         ip: remoteIp,
         user: remoteUser,
@@ -858,6 +1065,11 @@ function App() {
         code: pairingInput,
         isRemote: targetEnvironment === "cloud",
         remote: remoteConfig
+=======
+      await invoke("approve_pairing", { 
+        code: pairingInput,
+        remote: setupLocation === "remote" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null
+>>>>>>> origin/main
       });
       setPairingStatus("✅ Success! Bot paired.");
       setPairingInput("");
@@ -872,6 +1084,7 @@ function App() {
     setLogs(`Starting maintenance: ${action}...\n`);
     try {
       let res: string;
+<<<<<<< HEAD
 
       // Build remote config if cloud environment
       const remoteConfig = targetEnvironment === "cloud" && sshStatus === "success" ? {
@@ -898,12 +1111,81 @@ function App() {
         // Reset everything after uninstall
         setChecks(prev => ({ ...prev, openclaw: false }));
         setMaintenanceStatus(`✅ Uninstall completed successfully.`);
+=======
+      const remote = { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null };
+      
+      if (setupLocation === "remote") {
+        if (action === "repair") {
+          res = await invoke("run_remote_doctor_repair", { remote });
+          setMaintenanceStatus(`✅ Repair completed successfully on ${remoteIp}.`);
+        } else if (action === "audit") {
+          res = await invoke("run_remote_security_audit_fix", { remote });
+          setMaintenanceStatus(`✅ Security Audit completed successfully on ${remoteIp}.`);
+        } else if (action === "update") {
+          // Check version first
+          const current: string = await invoke("get_remote_openclaw_version", { remote });
+          setLogs(prev => prev + `Current version: ${current}\n`);
+          // This is a simplified check - in reality we'd compare with latest from npm
+          // For now we'll just inform and proceed with install
+          res = await invoke("update_remote_openclaw", { remote });
+          setMaintenanceStatus(`✅ OpenClaw updated to latest on ${remoteIp}.`);
+        } else {
+          res = await invoke("uninstall_remote_openclaw", { remote });
+          setChecks(prev => ({ ...prev, openclaw: false }));
+          setMaintenanceStatus(`✅ Uninstall completed successfully from ${remoteIp}.`);
+        }
+      } else {
+        if (action === "repair") {
+          res = await invoke("run_doctor_repair");
+          setMaintenanceStatus(`✅ Repair completed successfully.`);
+        } else if (action === "audit") {
+          res = await invoke("run_security_audit_fix");
+          setMaintenanceStatus(`✅ Security Audit completed successfully.`);
+        } else if (action === "update") {
+          const current: string = await invoke("get_openclaw_version");
+          setLogs(prev => prev + `Current version: ${current}\n`);
+          res = await invoke("install_openclaw"); 
+          setMaintenanceStatus(`✅ OpenClaw updated to latest.`);
+        } else {
+          res = await invoke("uninstall_openclaw");
+          setChecks(prev => ({ ...prev, openclaw: false }));
+          setMaintenanceStatus(`✅ Uninstall completed successfully.`);
+        }
+>>>>>>> origin/main
       }
       setLogs(prev => prev + (res || ""));
       setMaintCompleted(true);
     } catch (e) {
       setLogs(prev => prev + `\nError: ${e}`);
       setMaintenanceStatus(`❌ ${action} failed.`);
+    }
+    setLoading(false);
+  }
+
+  async function handleToggleTunnel() {
+    setLoading(true);
+    if (tunnelActive) {
+      try {
+        await invoke("stop_ssh_tunnel");
+        setTunnelActive(false);
+        setMaintenanceStatus("✅ SSH Tunnel disconnected.");
+      } catch (e) {
+        setMaintenanceStatus(`❌ Failed to stop tunnel: ${e}`);
+      }
+    } else {
+      setMaintenanceStatus("Establishing SSH tunnel...");
+      try {
+        const remote = { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null };
+        await invoke("start_ssh_tunnel", {
+          remote,
+          localPort: 18789,
+          remotePort: gatewayPort
+        });
+        setTunnelActive(true);
+        setMaintenanceStatus("✅ SSH Tunnel established on port 18789.");
+      } catch (e) {
+        setMaintenanceStatus(`❌ Failed to establish tunnel: ${e}`);
+      }
     }
     setLoading(false);
   }
@@ -930,6 +1212,7 @@ function App() {
         return (
           <div className="step-view">
             <h2>Welcome Back</h2>
+<<<<<<< HEAD
             <p className="step-description">
               OpenClaw is already installed {targetEnvironment === "cloud" ? `on ${remoteIp}` : "on your system"}. What would you like to do?
             </p>
@@ -1023,6 +1306,10 @@ function App() {
 
             {/* Maintenance Options */}
             <h3 style={{marginBottom: "1rem"}}>Maintenance Options</h3>
+=======
+            <p className="step-description">OpenClaw is already installed on {setupLocation === "local" ? "your system" : `remote server ${remoteIp}`}. What would you like to do?</p>
+            
+>>>>>>> origin/main
             <div className="mode-card-container" style={{gridTemplateColumns: "1fr", gap: "1rem"}}>
               <div
                 className={`mode-card ${selectedMaint === "repair" ? "active" : ""}`}
@@ -1040,8 +1327,21 @@ function App() {
                 <p>Run <code>openclaw security audit --fix</code> to audit and tighten system permissions.</p>
               </div>
 
+<<<<<<< HEAD
               <div
                 className={`mode-card ${selectedMaint === "reconfigure" ? "active" : ""}`}
+=======
+              <div 
+                className={`mode-card ${selectedMaint === "update" ? "active" : ""}`} 
+                onClick={() => !loading && setSelectedMaint("update")}
+              >
+                <h3>🚀 Upgrade OpenClaw Version</h3>
+                <p>Upgrade to the latest version of OpenClaw {setupLocation === "remote" ? "on the server" : ""}.</p>
+              </div>
+
+              <div 
+                className={`mode-card ${selectedMaint === "reconfigure" ? "active" : ""}`} 
+>>>>>>> origin/main
                 onClick={() => !loading && setSelectedMaint("reconfigure")}
               >
                 <h3>⚙️ Reconfigure OpenClaw</h3>
@@ -1054,11 +1354,12 @@ function App() {
                 onClick={() => !loading && setSelectedMaint("uninstall")}
               >
                 <h3 style={selectedMaint === "uninstall" ? {color: "var(--error)"} : {}}>🗑 Uninstall Completely</h3>
-                <p>Remove the OpenClaw CLI and all local configuration/data files.</p>
+                <p>Remove the OpenClaw CLI and all {setupLocation === "local" ? "local" : "remote"} configuration/data files.</p>
               </div>
             </div>
 
             {!loading && (
+<<<<<<< HEAD
               <div className="button-group" style={{gap: "10px", marginTop: "1.5rem"}}>
                 <button
                   className="primary"
@@ -1081,6 +1382,48 @@ function App() {
                 </button>
                 {maintCompleted && (
                   <button className="secondary" style={{flex: 1}} onClick={() => invoke("close_app")}>Exit Setup</button>
+=======
+              <div style={{marginTop: "2rem", display: "flex", flexDirection: "column", gap: "1rem"}}>
+                <div className="button-group" style={{marginTop: 0, gap: "10px"}}>
+                  <button className="primary" style={{flex: 1}} onClick={() => {
+                    if (selectedMaint === "reconfigure") setStep(3); // Skip environment & check
+                    else if (selectedMaint === "uninstall") {
+                      if (confirm(`Are you absolutely sure you want to completely remove OpenClaw from ${setupLocation === "local" ? "this system" : remoteIp}?`)) {
+                        handleMaintenanceAction("uninstall");
+                      }
+                    } else {
+                      handleMaintenanceAction(selectedMaint);
+                    }
+                  }}>Confirm Action</button>
+                  {maintCompleted && (
+                    <button className="secondary" style={{flex: 1}} onClick={() => invoke("close_app")}>Exit Setup</button>
+                  )}
+                </div>
+
+                {setupLocation === "remote" && (
+                  <div className="button-group" style={{marginTop: 0, gap: "10px"}}>
+                    <button className="secondary" style={{flex: 1}} onClick={handleToggleTunnel}>
+                      {tunnelActive ? "🔓 Disconnect SSH Tunnel" : "🔗 Establish SSH Tunnel"}
+                    </button>
+                    <button className="primary" style={{flex: 1}} onClick={async () => {
+                      if (setupLocation === "remote") {
+                        try {
+                          const token = await invoke("get_remote_gateway_token", {
+                            remote: { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null }
+                          });
+                          open(`http://127.0.0.1:18789/?token=${token}`);
+                        } catch (e) {
+                          setMaintenanceStatus(`❌ Error fetching remote token: ${e}`);
+                        }
+                      } else {
+                        const url = await invoke("get_dashboard_url");
+                        open(url as string);
+                      }
+                    }} disabled={!tunnelActive && setupLocation === "remote"}>
+                      🚀 Open Dashboard
+                    </button>
+                  </div>
+>>>>>>> origin/main
                 )}
               </div>
             )}
@@ -1118,6 +1461,7 @@ function App() {
         return (
           <div className="step-view">
             <h2>Target Environment</h2>
+<<<<<<< HEAD
             <p className="step-description">Where will you be running OpenClaw?</p>
             <div className="mode-card-container">
               <div className={`mode-card ${targetEnvironment === "local" ? "active" : ""}`} onClick={() => {
@@ -1237,10 +1581,141 @@ function App() {
               >
                 Continue
               </button>
+=======
+            <p className="step-description">Where would you like to install and run OpenClaw?</p>
+            <div className="mode-card-container">
+              <div className={`mode-card ${setupLocation === "local" ? "active" : ""}`} onClick={() => setSetupLocation("local")}>
+                <h3>Local Machine</h3>
+                <p>Install on this computer (macOS). Best for personal use.</p>
+              </div>
+              <div className={`mode-card ${setupLocation === "remote" ? "active" : ""}`} onClick={() => setSetupLocation("remote")}>
+                <h3>Remote Server</h3>
+                <p>Install on a Linux server via SSH. Best for 24/7 availability.</p>
+              </div>
+            </div>
+
+            {setupLocation === "remote" && (
+              <div className="remote-config animate-fadeIn" style={{marginTop: "2rem"}}>
+                <div className="form-group">
+                  <label>Server IP Address</label>
+                  <input placeholder="e.g. 1.2.3.4" value={remoteIp} onChange={(e) => setRemoteIp(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>SSH Username</label>
+                  <input 
+                    autoCapitalize="none" 
+                    autoCorrect="off" 
+                    spellCheck="false" 
+                    autoComplete="off" 
+                    placeholder="e.g. root or ubuntu" 
+                    value={remoteUser} 
+                    onChange={(e) => setRemoteUser(e.target.value)} 
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Private SSH Key (Optional)</label>
+                  <div style={{display: "flex", gap: "10px"}}>
+                    <input 
+                      readOnly 
+                      placeholder="Default keys (~/.ssh/id_rsa) used if empty" 
+                      value={remotePrivateKeyPath} 
+                    />
+                    <button className="secondary" style={{padding: "0 1rem"}} onClick={async () => {
+                      const selected = await openDialog({
+                        multiple: false,
+                        filters: [{ name: "SSH Key", extensions: ["*", "pem", "key"] }]
+                      });
+                      if (selected && typeof selected === "string") {
+                        setRemotePrivateKeyPath(selected);
+                      }
+                    }}>Select</button>
+                    {remotePrivateKeyPath && (
+                      <button className="secondary" style={{padding: "0 1rem", color: "var(--error)"}} onClick={() => setRemotePrivateKeyPath("")}>X</button>
+                    )}
+                  </div>
+                </div>
+                
+                {sshStatus === "requesting_password" && (
+                  <div className="form-group animate-fadeIn">
+                    <label>SSH Password</label>
+                    <input type="password" placeholder="Enter password" value={remotePassword} onChange={(e) => setRemotePassword(e.target.value)} />
+                    <p className="input-hint">Using a password is less secure than SSH keys, but we support it for initial setup.</p>
+                  </div>
+                )}
+
+                {sshStatus === "error" && (
+                  <p className="error" style={{color: "var(--error)", fontSize: "0.9rem", marginTop: "1rem"}}>{sshError}</p>
+                )}
+
+                {sshStatus === "success" && (
+                  <p className="success" style={{color: "var(--success)", fontSize: "0.9rem", marginTop: "1rem"}}>✅ Connected to remote server!</p>
+                )}
+
+                <button 
+                  className="secondary" 
+                  style={{width: "100%", marginTop: "1rem"}} 
+                  onClick={handleSshCheck}
+                  disabled={sshStatus === "checking" || !remoteIp || !remoteUser}
+                >
+                  {sshStatus === "checking" ? "Connecting..." : (sshStatus === "requesting_password" ? "Retry with Password" : "Test Connection")}
+                </button>
+              </div>
+            )}
+
+            <div className="button-group" style={{marginTop: "2rem"}}>
+              <button 
+                className="primary" 
+                disabled={loading || (setupLocation === "remote" && sshStatus !== "success")} 
+                onClick={checkSystem}
+              >
+                {loading ? "Checking..." : "Continue"}
+              </button>
             </div>
           </div>
         );
       case 2:
+        return (
+          <div className="step-view">
+            <h2>System Check: {setupLocation === "local" ? "Local" : "Remote"}</h2>
+            <p className="step-description">Verifying requirements on {setupLocation === "local" ? "your machine" : remoteIp}.</p>
+            <div className="check-item">
+              <span className="check-status">{checks.node ? "✅" : "❌"}</span>
+              Node.js {checks.node ? "detected" : "not found"}
+            </div>
+            <div className="check-item">
+              <span className="check-status">{checks.openclaw ? "✅" : "⏳"}</span>
+              OpenClaw {checks.openclaw ? "Installed" : "Ready to install"}
+            </div>
+            {setupLocation === "local" && !checks.node && (
+              <div className="error" style={{marginTop: "1rem", color: "var(--error)"}}>
+                <p>Node.js is required.</p>
+                <div style={{display: "flex", gap: "10px", alignItems: "center", marginTop: "5px"}}>
+                  <button 
+                    className="secondary small"
+                    onClick={installLocalNode} 
+                    disabled={installingNode}
+                    style={{padding: "4px 10px", fontSize: "0.8rem", cursor: "pointer"}}
+                  >
+                    {installingNode ? "Installing..." : "Install Now"}
+                  </button>
+                  {nodeInstallError && <span style={{fontSize: "0.8rem"}}>{nodeInstallError}</span>}
+                </div>
+              </div>
+            )}
+            {setupLocation === "remote" && !checks.node && (
+              <p className="input-hint" style={{marginTop: "1rem", color: "var(--primary)"}}>
+                ℹ️ Node.js will be automatically installed on the remote server during setup.
+              </p>
+            )}
+            <div className="button-group">
+              <button className="primary" disabled={setupLocation === "local" && !checks.node} onClick={() => setStep(3)}>Continue</button>
+              <button className="secondary" onClick={() => setStep(1)}>Back</button>
+>>>>>>> origin/main
+            </div>
+          </div>
+        );
+      case 3:
         return (
           <div className="step-view">
             <h2>System Check</h2>
@@ -1313,7 +1788,16 @@ function App() {
             <p className="step-description">What should the agent call you?</p>
             <div className="form-group">
               <label>Your Name</label>
-              <input autoFocus placeholder="e.g. David" value={userName} onChange={(e) => setUserName(e.target.value)} />
+              <input 
+                autoFocus 
+                autoCapitalize="none" 
+                autoCorrect="off" 
+                spellCheck="false" 
+                autoComplete="off" 
+                placeholder="e.g. David" 
+                value={userName} 
+                onChange={(e) => setUserName(e.target.value)} 
+              />
             </div>
             <div className="button-group">
               <button className="primary" disabled={!userName} onClick={() => setStep(6)}>Next</button>
@@ -1597,6 +2081,7 @@ function App() {
             <div className="button-group">
               <button className="primary" onClick={() => setStep(11)}>Next</button>
               <button className="secondary" onClick={() => setStep(9)}>Back</button>
+<<<<<<< HEAD
             </div>
           </div>
         );
@@ -1712,6 +2197,38 @@ function App() {
             </div>
           </div>
         );
+=======
+            </div>
+          </div>
+        );
+      case 11:
+        return (
+          <div className="step-view">
+            <h2>Select Core Skills</h2>
+            <p className="step-description">Enable the capabilities your agent will start with.</p>
+            <div className="skills-grid">
+              {availableSkills.map(skill => (
+                <div 
+                  key={skill.id} 
+                  className={`skill-card ${selectedSkills.includes(skill.id) ? "active" : ""}`}
+                  onClick={() => toggleSkill(skill.id)}
+                >
+                  <div className="skill-name">{skill.name}</div>
+                  <div className="skill-desc">{skill.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="button-group">
+              <button className="primary" onClick={() => {
+                setCurrentServiceIdx(0);
+                setIsConfiguringService(false);
+                setStep(11.5);
+              }}>Continue</button>
+              <button className="secondary" onClick={() => setStep(10)}>Back</button>
+            </div>
+          </div>
+        );
+>>>>>>> origin/main
       case 11.5:
         return (
           <div className="step-view">
@@ -1793,6 +2310,7 @@ function App() {
           </div>
         );
       case 12:
+<<<<<<< HEAD
         return (
           <div className="step-view">
             <h2>Security Configuration</h2>
@@ -2331,6 +2849,8 @@ function App() {
           </div>
         );
       case 17:
+=======
+>>>>>>> origin/main
         return (
           <div className="step-view">
             <h2>Setup Complete! 🦞</h2>
@@ -2385,9 +2905,19 @@ function App() {
                  <div className="form-group" style={{marginTop: "2rem"}}>
                    <input
                      type="text"
+<<<<<<< HEAD
                      placeholder="Enter code (e.g. 3RQ8EBFE)"
                      value={pairingInput}
                      onChange={(e) => setPairingInput(e.target.value.toUpperCase())}
+=======
+                     autoCapitalize="none"
+                     autoCorrect="off"
+                     spellCheck="false"
+                     autoComplete="off"
+                     placeholder="Enter code (e.g. 3RQ8EBFE)" 
+                     value={pairingInput} 
+                     onChange={(e) => setPairingInput(e.target.value.toUpperCase())} 
+>>>>>>> origin/main
                      style={{textAlign: "center", letterSpacing: "2px", fontWeight: "bold"}}
                    />
                    <button className="primary" style={{width: "100%", marginTop: "1rem"}} onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
