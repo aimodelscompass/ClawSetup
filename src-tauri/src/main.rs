@@ -254,40 +254,71 @@ fn create_custom_skill(name: String, content: String) -> Result<String, String> 
 async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Result<String, String> {
     let sess = connect_ssh(&remote)?;
 
-    // 1. Check/Install Node.js (Ubuntu/Debian focus)
-    // We use a wrapper to try executing with nvm sourced if node isn't found immediately
-    let node_check = execute_ssh(&sess, "node -v");
-    if node_check.is_err() {
-        // Install NVM and Node.js
-        execute_ssh(&sess, "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash")
-            .map_err(|e| format!("Failed to install nvm: {}", e))?;
+    // 1. Check/Install Node.js
+    let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+    let is_root = execute_ssh(&sess, "id -u")?.trim() == "0";
+    let sudo_prefix = if is_root { "" } else { "sudo " };
 
-        // Install Node.js using NVM
-        // We must source nvm.sh in the same command
-        let install_node_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
-            [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
-            nvm install node && nvm use node && nvm alias default node";
-        
-        execute_ssh(&sess, install_node_cmd)
-            .map_err(|e| format!("Failed to install Node.js via nvm: {}", e))?;
+    if os_type == "Linux" {
+        // Check if node exists
+        if execute_ssh(&sess, "node -v").is_err() {
+            // Install curl if missing (needed for nodesource script)
+            // We chain apt-get update to ensure we can install curl
+            let install_curl = format!("{}apt-get update && {}apt-get install -y curl", sudo_prefix, sudo_prefix);
+            execute_ssh(&sess, &install_curl).map_err(|e| format!("Failed to install curl: {}", e))?;
+
+            // Add NodeSource repo and install Node.js
+            // We pipe to bash. If not root, we need to run bash with sudo rights to modify apt sources.
+            let setup_cmd = if is_root {
+                 "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
+            } else {
+                 "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+            };
+            execute_ssh(&sess, setup_cmd).map_err(|e| format!("Failed to setup NodeSource: {}", e))?;
+            
+            let install_node = format!("{}apt-get install -y nodejs", sudo_prefix);
+            execute_ssh(&sess, &install_node).map_err(|e| format!("Failed to install Node.js: {}", e))?;
+        }
+    } else if os_type == "Darwin" {
+         if execute_ssh(&sess, "node -v").is_err() {
+             // Check brew
+             if execute_ssh(&sess, "command -v brew").is_err() {
+                 // Install brew non-interactively
+                 let install_brew = "NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
+                 execute_ssh(&sess, install_brew).map_err(|e| format!("Failed to install Homebrew: {}", e))?;
+                 
+                 // Add brew to shellrc for future sessions (Standard paths for Apple Silicon / Intel)
+                 let configure_shell = r#"
+                    (echo; echo 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"') >> $HOME/.zprofile
+                    (echo; echo 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"') >> $HOME/.bash_profile
+                 "#;
+                 let _ = execute_ssh(&sess, configure_shell);
+             }
+             
+             // Install node using brew, ensuring brew is in path for this session
+             let install_node = "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; brew install node";
+             execute_ssh(&sess, install_node).map_err(|e| format!("Failed to install Node.js via Homebrew: {}", e))?;
+         }
     }
 
     // 2. Install OpenClaw
-    // Use nvm-aware command structure
-    let install_claw_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
-        [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
-        npm install -g openclaw";
+    let install_claw_cmd = if os_type == "Linux" {
+        format!("{}npm install -g openclaw", sudo_prefix)
+    } else {
+        // MacOS: rely on brew environment
+        "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; npm install -g openclaw".to_string()
+    };
         
-    execute_ssh(&sess, install_claw_cmd)
+    execute_ssh(&sess, &install_claw_cmd)
         .map_err(|e| format!("Failed to install OpenClaw: {}", e))?;
     
-    // Ensure openclaw is in path or symlinked for future non-interactive shells if possible
-    // But mostly we rely on sourcing nvm or it being in .bashrc for interactive
-    // Let's verify we can run it
-    let verify_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
-        [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
-        openclaw --version";
-    execute_ssh(&sess, verify_cmd)?;
+    // Ensure openclaw is in path for verification
+    let verify_cmd = if os_type == "Linux" {
+        "openclaw --version".to_string()
+    } else {
+        "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; openclaw --version".to_string()
+    };
+    execute_ssh(&sess, &verify_cmd)?;
 
     // 3. Configure
     let remote_home = execute_ssh(&sess, "echo $HOME")?.trim().to_string();
@@ -456,9 +487,12 @@ Serve {}."#, config.user_name)
     }).replace("'", "'\\''");
     execute_ssh(&sess, &format!("echo '{}' > {}/SOUL.md", soul_md, workspace))?;
 
-    // Node Manager
-    // Prefix with NVM sourcing for all openclaw commands
-    let nvm_prefix = "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; ";
+    // Prefix for openclaw commands (ensure brew env is loaded on Mac)
+    let nvm_prefix = if os_type == "Darwin" {
+        "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; "
+    } else {
+        ""
+    };
     
     if let Some(nm) = config.node_manager {
         let _ = execute_ssh(&sess, &format!("{}openclaw config set skills.nodeManager {}", nvm_prefix, nm));
