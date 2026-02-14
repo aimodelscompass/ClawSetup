@@ -597,7 +597,7 @@ function App() {
 
     try {
       // Changed to use object parameter to match backend
-      await invoke("test_ssh_connection", {
+      const checkPromise = invoke("test_ssh_connection", {
         remote: {
           ip: remoteIp,
           user: remoteUser,
@@ -605,6 +605,14 @@ function App() {
           privateKeyPath: remotePrivateKeyPath || null
         }
       });
+
+      // Timeout after 15 seconds
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Connection timed out")), 15000)
+      );
+
+      await Promise.race([checkPromise, timeoutPromise]);
+
       setSshStatus("success");
       setSshError("");
     } catch (e) {
@@ -724,7 +732,15 @@ function App() {
 
         setProgress("Establishing SSH tunnel...");
         setLogs("Creating SSH tunnel to remote gateway...");
-        await invoke("start_ssh_tunnel", { remote: remoteConfig });
+        try {
+          await invoke("start_ssh_tunnel", { remote: remoteConfig });
+        } catch (e: any) {
+          if (String(e).includes("SSH tunnel is already running")) {
+            setLogs(prev => prev + "\nTunnel already active.");
+          } else {
+            throw e;
+          }
+        }
         setTunnelActive(true);
 
         // Verify tunnel is working with HTTP connectivity test
