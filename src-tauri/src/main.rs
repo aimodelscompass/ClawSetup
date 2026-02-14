@@ -229,7 +229,8 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     // 1. Check/Install Node.js (Ubuntu/Debian focus)
     let node_check = execute_ssh(&sess, "node -v");
     if node_check.is_err() {
-        execute_ssh(&sess, "curl -fsSL https://deb.nodesource.com/setup_18.x | sudo bash - && sudo apt-get install -y nodejs")
+        // Install latest Node.js (supports Debian/Ubuntu)
+        execute_ssh(&sess, "curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash - && sudo apt-get install -y nodejs")
             .map_err(|e| format!("Failed to install Node.js: {}", e))?;
     }
 
@@ -1045,9 +1046,30 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     }
 }
 
+#[command]
+async fn install_local_nodejs() -> Result<String, String> {
+    // 1. Try brew
+    if shell_command("brew --version").is_ok() {
+        return shell_command("brew install node");
+    }
+
+    // 2. Try nvm (via curl)
+    // Install nvm if not present
+    let install_nvm_cmd = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash";
+    shell_command(install_nvm_cmd).map_err(|e| format!("Failed to install nvm: {}", e))?;
+    
+    // Install node via nvm (sourcing nvm.sh in the same shell session)
+    let install_node_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
+        [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
+        nvm install node && nvm alias default node";
+        
+    shell_command(install_node_cmd).map_err(|e| format!("Failed to install Node.js via nvm: {}", e))
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            install_local_nodejs,
             check_prerequisites,
             install_openclaw,
             configure_agent,

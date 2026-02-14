@@ -20,6 +20,8 @@ function App() {
   const [error, setError] = useState(false);
   const [logs, setLogs] = useState("");
   const [pairingCode, setPairingCode] = useState("");
+  const [installingNode, setInstallingNode] = useState(false);
+  const [nodeInstallError, setNodeInstallError] = useState("");
 
   // Form Data
   const [userName, setUserName] = useState("");
@@ -87,6 +89,25 @@ function App() {
     { id: 11, name: "Skills", advanced: true },
     { id: 12, name: "Pairing" }
   ];
+
+  async function installLocalNode() {
+    setInstallingNode(true);
+    setNodeInstallError("");
+    try {
+      await invoke("install_local_nodejs");
+      // Re-check prerequisites
+      const res: any = await invoke("check_prerequisites");
+      setChecks({
+        node: res.node_installed,
+        docker: res.docker_running,
+        openclaw: res.openclaw_installed
+      });
+    } catch (e) {
+      setNodeInstallError("Failed to install: " + e);
+    } finally {
+      setInstallingNode(false);
+    }
+  }
 
   useEffect(() => { 
     // Initial check just to see if local is already installed
@@ -610,9 +631,20 @@ function App() {
               OpenClaw {checks.openclaw ? "Installed" : "Ready to install"}
             </div>
             {setupLocation === "local" && !checks.node && (
-              <p className="error" style={{marginTop: "1rem", color: "var(--error)"}}>
-                Please install Node.js (v18+) on your local machine to continue.
-              </p>
+              <div className="error" style={{marginTop: "1rem", color: "var(--error)"}}>
+                <p>Node.js is required.</p>
+                <div style={{display: "flex", gap: "10px", alignItems: "center", marginTop: "5px"}}>
+                  <button 
+                    className="secondary small"
+                    onClick={installLocalNode} 
+                    disabled={installingNode}
+                    style={{padding: "4px 10px", fontSize: "0.8rem", cursor: "pointer"}}
+                  >
+                    {installingNode ? "Installing..." : "Install Now"}
+                  </button>
+                  {nodeInstallError && <span style={{fontSize: "0.8rem"}}>{nodeInstallError}</span>}
+                </div>
+              </div>
             )}
             {setupLocation === "remote" && !checks.node && (
               <p className="input-hint" style={{marginTop: "1rem", color: "var(--primary)"}}>
