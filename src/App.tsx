@@ -4,176 +4,256 @@ import { open } from "@tauri-apps/api/shell";
 import { open as openDialog } from "@tauri-apps/api/dialog";
 import "./App.css";
 
-const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string }>> = {
-  "amazon-bedrock": [
-    { value: "amazon-bedrock/amazon.nova-2-lite-v1:0", label: "Amazon Nova 2 Lite" },
-    { value: "amazon-bedrock/amazon.nova-lite-v1:0", label: "Amazon Nova Lite" },
-    { value: "amazon-bedrock/amazon.nova-micro-v1:0", label: "Amazon Nova Micro" },
-    { value: "amazon-bedrock/amazon.nova-premier-v1:0", label: "Amazon Nova Premier" },
-    { value: "amazon-bedrock/amazon.nova-pro-v1:0", label: "Amazon Nova Pro" },
-    { value: "amazon-bedrock/amazon.titan-text-express-v1", label: "Amazon Titan Text Express" },
-    { value: "amazon-bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet" },
-    { value: "amazon-bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet v2" },
-    { value: "amazon-bedrock/anthropic.claude-3-5-haiku-20241022-v1:0", label: "Claude 3.5 Haiku" },
-    { value: "amazon-bedrock/anthropic.claude-opus-4-6-v1:0", label: "Claude Opus 4.6" },
-    { value: "amazon-bedrock/deepseek.r1-v1:0", label: "DeepSeek R1" },
-    { value: "amazon-bedrock/deepseek.v3-v1:0", label: "DeepSeek V3" },
-    { value: "amazon-bedrock/meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" },
-    { value: "amazon-bedrock/meta.llama4-maverick-17b-v1:0", label: "Llama 4 Maverick" },
-    { value: "amazon-bedrock/meta.llama4-scout-17b-v1:0", label: "Llama 4 Scout" },
-    { value: "amazon-bedrock/mistral.mistral-large-2411-v1:0", label: "Mistral Large 24.11" },
-    { value: "amazon-bedrock/qwen.qwen3-235b-a22b-v1:0", label: "Qwen 3 235B" },
-  ],
+const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string; description?: string }>> = {
   "anthropic": [
-    { value: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
-    { value: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4.5" },
-    { value: "anthropic/claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet (Latest)" },
-    { value: "anthropic/claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet (2025-02-19)" },
-    { value: "anthropic/claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet (Latest)" },
-    { value: "anthropic/claude-3-5-haiku-latest", label: "Claude 3.5 Haiku (Latest)" },
-    { value: "anthropic/claude-opus-4-5", label: "Claude Opus 4.5" },
-    { value: "anthropic/claude-3-opus-20240229", label: "Claude 3 Opus" },
-    { value: "anthropic/claude-3-haiku-20240307", label: "Claude 3 Haiku" },
-  ],
-  "azure-openai-responses": [
-    { value: "azure-openai-responses/gpt-4o", label: "GPT-4o" },
-    { value: "azure-openai-responses/gpt-4-turbo", label: "GPT-4 Turbo" },
-    { value: "azure-openai-responses/gpt-5", label: "GPT-5" },
-    { value: "azure-openai-responses/gpt-5-pro", label: "GPT-5 Pro" },
-    { value: "azure-openai-responses/o1", label: "o1" },
-    { value: "azure-openai-responses/o3-mini", label: "o3-mini" },
-    { value: "azure-openai-responses/o4-mini", label: "o4-mini" },
-    { value: "azure-openai-responses/codex-mini-latest", label: "Codex Mini" },
-  ],
-  "cerebras": [
-    { value: "cerebras/gpt-oss-120b", label: "GPT OSS 120B" },
-    { value: "cerebras/qwen-3-235b-a22b-instruct-2507", label: "Qwen 3 235B" },
-    { value: "cerebras/zai-glm-4.7", label: "GLM 4.7" },
-  ],
-  "github-copilot": [
-    { value: "github-copilot/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
-    { value: "github-copilot/claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "github-copilot/gpt-4o", label: "GPT-4o" },
-    { value: "github-copilot/gpt-5", label: "GPT-5" },
-    { value: "github-copilot/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "github-copilot/grok-code-fast-1", label: "Grok Code Fast" },
-  ],
-  "google": [
-    { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-    { value: "google/gemini-2.0-pro-preview-05-06", label: "Gemini 2.0 Pro Preview" },
-    { value: "google/gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-    { value: "google/gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
-    { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
-    { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-    { value: "google/gemini-1.5-pro", label: "Gemini 1.5 Pro" },
-    { value: "google/gemini-1.5-flash", label: "Gemini 1.5 Flash" },
-    { value: "google/gemini-live-2.5-flash", label: "Gemini Live 2.5 Flash" },
-  ],
-  "google-antigravity": [
-    { value: "google-antigravity/claude-opus-4-5-thinking", label: "Claude Opus 4.5 Thinking" },
-    { value: "google-antigravity/claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
-    { value: "google-antigravity/gemini-3-pro-high", label: "Gemini 3 Pro High" },
-    { value: "google-antigravity/gpt-oss-120b-medium", label: "GPT OSS 120B Medium" },
-  ],
-  "google-gemini-cli": [
-    { value: "google-gemini-cli/gemini-3-pro-preview", label: "Gemini 3 Pro" },
-    { value: "google-gemini-cli/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "google-gemini-cli/gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  ],
-  "google-vertex": [
-    { value: "google-vertex/gemini-3-pro-preview", label: "Gemini 3 Pro (Vertex)" },
-    { value: "google-vertex/gemini-2.5-pro", label: "Gemini 2.5 Pro (Vertex)" },
-    { value: "google-vertex/gemini-2.0-flash", label: "Gemini 2.0 Flash (Vertex)" },
-    { value: "google-vertex/gemini-1.5-pro", label: "Gemini 1.5 Pro (Vertex)" },
-  ],
-  "groq": [
-    { value: "groq/llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
-    { value: "groq/llama-3.1-8b-instant", label: "Llama 3.1 8B" },
-    { value: "groq/deepseek-r1-distill-llama-70b", label: "DeepSeek R1 70B" },
-    { value: "groq/qwen-qwq-32b", label: "Qwen QWQ 32B" },
-    { value: "groq/mistral-saba-24b", label: "Mistral Saba 24B" },
-  ],
-  "huggingface": [
-    { value: "huggingface/deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2" },
-    { value: "huggingface/Qwen/Qwen3-235B-A22B-Thinking", label: "Qwen 3 235B Thinking" },
-    { value: "huggingface/moonshotai/Kimi-K2.5", label: "Kimi K2.5" },
-    { value: "huggingface/zai-org/GLM-4.7", label: "GLM 4.7" },
-  ],
-  "kimi-coding": [
-    { value: "kimi-coding/k2p5", label: "Kimi K2.5" },
-    { value: "kimi-coding/kimi-k2-thinking", label: "Kimi K2 Thinking" },
-  ],
-  "minimax": [
-    { value: "minimax/MiniMax-M2.1", label: "MiniMax M2.1" },
-    { value: "minimax-cn/MiniMax-M2.1", label: "MiniMax M2.1 (China)" },
-  ],
-  "mistral": [
-    { value: "mistral/mistral-large-latest", label: "Mistral Large" },
-    { value: "mistral/mistral-medium-latest", label: "Mistral Medium" },
-    { value: "mistral/codestral-latest", label: "Codestral" },
-    { value: "mistral/pixtral-large-latest", label: "Pixtral Large" },
-    { value: "mistral/ministral-8b-latest", label: "Ministral 8B" },
-    { value: "mistral/mistral-nemo", label: "Mistral Nemo" },
+    { value: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4 5", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4 5 20251001", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-0", label: "Claude Opus 4 0", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-1", label: "Claude Opus 4 1", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-1-20250805", label: "Claude Opus 4 1 20250805", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-20250514", label: "Claude Opus 4 20250514", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-5", label: "Claude Opus 4 5", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-5-20251101", label: "Claude Opus 4 5 20251101", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-opus-4-6", label: "Claude Opus 4 6", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-sonnet-4-0", label: "Claude Sonnet 4 0", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-sonnet-4-20250514", label: "Claude Sonnet 4 20250514", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4 5", description: "Input: text+image • Ctx: 195k" },
+    { value: "anthropic/claude-sonnet-4-5-20250929", label: "Claude Sonnet 4 5 20250929", description: "Input: text+image • Ctx: 195k" },
   ],
   "openai": [
-    { value: "openai/gpt-4o", label: "GPT-4o" },
-    { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
-    { value: "openai/gpt-5", label: "GPT-5" },
-    { value: "openai/gpt-5-pro", label: "GPT-5 Pro" },
-    { value: "openai/o1-pro", label: "o1 Pro" },
-    { value: "openai/o3-mini", label: "o3-mini" },
-    { value: "openai/o4-mini", label: "o4-mini" },
-    { value: "openai/gpt-4-turbo", label: "GPT-4 Turbo" },
-    { value: "openai/codex-mini-latest", label: "Codex Mini" },
+    { value: "openai/gpt-5", label: "GPT-5", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5-chat-latest", label: "GPT-5 Chat Latest", description: "Input: text+image • Ctx: 125k" },
+    { value: "openai/gpt-5-codex", label: "GPT-5 Codex", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5-mini", label: "GPT-5 Mini", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5-nano", label: "GPT-5 Nano", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5-pro", label: "GPT-5 Pro", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.1", label: "GPT-5.1", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.1-chat-latest", label: "GPT-5.1 Chat Latest", description: "Input: text+image • Ctx: 125k" },
+    { value: "openai/gpt-5.1-codex", label: "GPT-5.1 Codex", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.1-codex-max", label: "GPT-5.1 Codex Max", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.2", label: "GPT-5.2", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.2-chat-latest", label: "GPT-5.2 Chat Latest", description: "Input: text+image • Ctx: 125k" },
+    { value: "openai/gpt-5.2-codex", label: "GPT-5.2 Codex", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.2-pro", label: "GPT-5.2 Pro", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.3-codex", label: "GPT-5.3 Codex", description: "Input: text+image • Ctx: 391k" },
+    { value: "openai/gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", description: "Input: text+image • Ctx: 125k" },
   ],
-  "openai-codex": [
-    { value: "openai-codex/gpt-5.2-codex", label: "GPT 5.2 Codex" },
-    { value: "openai-codex/gpt-5.1-codex-max", label: "GPT 5.1 Codex Max" },
+  "google": [
+    { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
+    { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 977k" },
   ],
-  "opencode": [
-    { value: "opencode/claude-opus-4-6", label: "Claude Opus 4.6 (Free)" },
-    { value: "opencode/gemini-3-pro", label: "Gemini 3 Pro (Free)" },
-    { value: "opencode/gpt-5.1", label: "GPT 5.1 (Free)" },
-    { value: "opencode/kimi-k2.5-free", label: "Kimi K2.5 (Free)" },
-    { value: "opencode/qwen3-coder", label: "Qwen 3 Coder (Free)" },
+  "google-vertex": [
+    { value: "google-vertex/gemini-3-flash-preview", label: "Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
+    { value: "google-vertex/gemini-3-pro-preview", label: "Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 977k" },
   ],
   "openrouter": [
-    { value: "openrouter/auto", label: "Auto (Best for Task)" },
-    { value: "openrouter/anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
-    { value: "openrouter/openai/gpt-4o", label: "GPT-4o" },
-    { value: "openrouter/google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "openrouter/deepseek/deepseek-r1", label: "DeepSeek R1" },
-    { value: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
-    { value: "openrouter/x-ai/grok-3", label: "Grok-3" },
-    { value: "openrouter/mistralai/mistral-large-2512", label: "Mistral Large 25.12" },
-    { value: "openrouter/qwen/qwen3-235b-a22b-thinking", label: "Qwen 3 Thinking" },
-  ],
-  "vercel-ai-gateway": [
-    { value: "vercel-ai-gateway/anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
-    { value: "vercel-ai-gateway/openai/gpt-5", label: "GPT-5" },
-    { value: "vercel-ai-gateway/google/gemini-3-pro-preview", label: "Gemini 3 Pro" },
-    { value: "vercel-ai-gateway/deepseek/deepseek-v3.1", label: "DeepSeek V3.1" },
-    { value: "vercel-ai-gateway/xai/grok-4", label: "Grok-4" },
+    { value: "openrouter/ai21/jamba-large-1.7", label: "Ai21/Jamba Large 1.7", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/alibaba/tongyi-deepresearch-...", label: "Alibaba/Tongyi Deepresearch ...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/allenai/olmo-3.1-32b-instruct", label: "Allenai/Olmo 3.1 32B Instruct", description: "Input: text • Ctx: 64k" },
+    { value: "openrouter/amazon/nova-2-lite-v1", label: "Amazon/Nova 2 Lite V1", description: "Input: text+image • Ctx: 977k" },
+    { value: "openrouter/amazon/nova-lite-v1", label: "Amazon/Nova Lite V1", description: "Input: text+image • Ctx: 293k" },
+    { value: "openrouter/amazon/nova-micro-v1", label: "Amazon/Nova Micro V1", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/amazon/nova-premier-v1", label: "Amazon/Nova Premier V1", description: "Input: text+image • Ctx: 977k" },
+    { value: "openrouter/amazon/nova-pro-v1", label: "Amazon/Nova Pro V1", description: "Input: text+image • Ctx: 293k" },
+    { value: "openrouter/anthropic/claude-3-haiku", label: "Anthropic/Claude 3 Haiku", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-3.5-haiku", label: "Anthropic/Claude 3.5 Haiku", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-3.5-sonnet", label: "Anthropic/Claude 3.5 Sonnet", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-3.7-sonnet", label: "Anthropic/Claude 3.7 Sonnet", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-3.7-sonnet:...", label: "Anthropic/Claude 3.7 Sonnet:...", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-haiku-4.5", label: "Anthropic/Claude Haiku 4.5", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-opus-4", label: "Anthropic/Claude Opus 4", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-opus-4.1", label: "Anthropic/Claude Opus 4.1", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-opus-4.5", label: "Anthropic/Claude Opus 4.5", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/anthropic/claude-opus-4.6", label: "Anthropic/Claude Opus 4.6", description: "Input: text+image • Ctx: 977k" },
+    { value: "openrouter/anthropic/claude-sonnet-4", label: "Anthropic/Claude Sonnet 4", description: "Input: text+image • Ctx: 977k" },
+    { value: "openrouter/anthropic/claude-sonnet-4.5", label: "Anthropic/Claude Sonnet 4.5", description: "Input: text+image • Ctx: 977k" },
+    { value: "openrouter/arcee-ai/trinity-large-previ...", label: "Arcee Ai/Trinity Large Previ...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/arcee-ai/trinity-mini", label: "Arcee Ai/Trinity Mini", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/arcee-ai/trinity-mini:free", label: "Arcee Ai/Trinity Mini:Free", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/arcee-ai/virtuoso-large", label: "Arcee Ai/Virtuoso Large", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/auto", label: "Auto", description: "Input: text+image • Ctx: 1953k" },
+    { value: "openrouter/baidu/ernie-4.5-21b-a3b", label: "Baidu/Ernie 4.5 21B A3B", description: "Input: text • Ctx: 117k" },
+    { value: "openrouter/baidu/ernie-4.5-vl-28b-a3b", label: "Baidu/Ernie 4.5 Vl 28B A3B", description: "Input: text+image • Ctx: 29k" },
+    { value: "openrouter/bytedance-seed/seed-1.6", label: "Bytedance Seed/Seed 1.6", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/bytedance-seed/seed-1.6-flash", label: "Bytedance Seed/Seed 1.6 Flash", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/cohere/command-r-08-2024", label: "Cohere/Command R 08 2024", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/cohere/command-r-plus-08-2024", label: "Cohere/Command R Plus 08 2024", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/deepseek/deepseek-r1", label: "Deepseek/DeepSeek R1", description: "Input: text • Ctx: 63k" },
+    { value: "openrouter/deepseek/deepseek-r1-0528", label: "Deepseek/DeepSeek R1 0528", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-chat", label: "Deepseek/Deepseek Chat", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-chat-v3-0324", label: "Deepseek/Deepseek Chat V3 0324", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-chat-v3.1", label: "Deepseek/Deepseek Chat V3.1", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/deepseek/deepseek-v3.1-termi...", label: "Deepseek/Deepseek V3.1 Termi...", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-v3.1-terminus", label: "Deepseek/Deepseek V3.1 Terminus", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-v3.2", label: "Deepseek/Deepseek V3.2", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/deepseek/deepseek-v3.2-exp", label: "Deepseek/Deepseek V3.2 Exp", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/google/gemini-2.0-flash-001", label: "Google/Gemini 2.0 Flash 001", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.0-flash-lite...", label: "Google/Gemini 2.0 Flash Lite...", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-flash", label: "Google/Gemini 2.5 Flash", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-flash-lite", label: "Google/Gemini 2.5 Flash Lite", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-flash-lite...", label: "Google/Gemini 2.5 Flash Lite...", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-flash-prev...", label: "Google/Gemini 2.5 Flash Prev...", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-pro", label: "Google/Gemini 2.5 Pro", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-pro-previe...", label: "Google/Gemini 2.5 Pro Previe...", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-2.5-pro-preview", label: "Google/Gemini 2.5 Pro Preview", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-3-flash-preview", label: "Google/Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemini-3-pro-preview", label: "Google/Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/google/gemma-3-27b-it", label: "Google/Gemma 3 27B It", description: "Input: text+image • Ctx: 125k" },
+    { value: "openrouter/google/gemma-3-27b-it:free", label: "Google/Gemma 3 27B It:Free", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/inception/mercury", label: "Inception/Mercury", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/inception/mercury-coder", label: "Inception/Mercury Coder", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/kwaipilot/kat-coder-pro", label: "Kwaipilot/Kat Coder Pro", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/meta-llama/llama-3-8b-instruct", label: "Meta Llama/Llama 3 8B Instruct", description: "Input: text • Ctx: 8k" },
+    { value: "openrouter/meta-llama/llama-3.1-405b-in...", label: "Meta Llama/Llama 3.1 405B In...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/meta-llama/llama-3.1-70b-ins...", label: "Meta Llama/Llama 3.1 70B Ins...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/meta-llama/llama-3.1-8b-inst...", label: "Meta Llama/Llama 3.1 8B Inst...", description: "Input: text • Ctx: 16k" },
+    { value: "openrouter/meta-llama/llama-3.3-70b-ins...", label: "Meta Llama/Llama 3.3 70B Ins...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/meta-llama/llama-3.3-70b-ins...", label: "Meta Llama/Llama 3.3 70B Ins...", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/meta-llama/llama-4-maverick", label: "Meta Llama/Llama 4 Maverick", description: "Input: text+image • Ctx: 1024k" },
+    { value: "openrouter/meta-llama/llama-4-scout", label: "Meta Llama/Llama 4 Scout", description: "Input: text+image • Ctx: 320k" },
+    { value: "openrouter/minimax/minimax-m1", label: "Minimax/Minimax M1", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/minimax/minimax-m2", label: "Minimax/Minimax M2", description: "Input: text • Ctx: 192k" },
+    { value: "openrouter/minimax/minimax-m2.1", label: "Minimax/Minimax M2.1", description: "Input: text • Ctx: 192k" },
+    { value: "openrouter/minimax/minimax-m2.5", label: "Minimax/Minimax M2.5", description: "Input: text • Ctx: 200k" },
+    { value: "openrouter/mistralai/codestral-2508", label: "Mistralai/Codestral 2508", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/mistralai/devstral-2512", label: "Mistralai/Devstral 2512", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/mistralai/devstral-medium", label: "Mistralai/Devstral Medium", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/mistralai/devstral-small", label: "Mistralai/Devstral Small", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/mistralai/ministral-14b-2512", label: "Mistralai/Ministral 14B 2512", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/mistralai/ministral-3b-2512", label: "Mistralai/Ministral 3B 2512", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/ministral-8b-2512", label: "Mistralai/Ministral 8B 2512", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/mistralai/mistral-large", label: "Mistralai/Mistral Large", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/mistralai/mistral-large-2407", label: "Mistralai/Mistral Large 2407", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-large-2411", label: "Mistralai/Mistral Large 2411", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-large-2512", label: "Mistralai/Mistral Large 2512", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/mistralai/mistral-medium-3", label: "Mistralai/Mistral Medium 3", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-medium-3.1", label: "Mistralai/Mistral Medium 3.1", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-nemo", label: "Mistralai/Mistral Nemo", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-saba", label: "Mistralai/Mistral Saba", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/mistralai/mistral-small-24b-...", label: "Mistralai/Mistral Small 24B ...", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/mistralai/mistral-small-3.1-...", label: "Mistralai/Mistral Small 3.1 ...", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-small-3.1-...", label: "Mistralai/Mistral Small 3.1 ...", description: "Input: text+image • Ctx: 125k" },
+    { value: "openrouter/mistralai/mistral-small-3.2-...", label: "Mistralai/Mistral Small 3.2 ...", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/mistral-small-crea...", label: "Mistralai/Mistral Small Crea...", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/mistralai/mixtral-8x22b-inst...", label: "Mistralai/Mixtral 8X22B Inst...", description: "Input: text • Ctx: 64k" },
+    { value: "openrouter/mistralai/mixtral-8x7b-instruct", label: "Mistralai/Mixtral 8X7B Instruct", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/mistralai/pixtral-large-2411", label: "Mistralai/Pixtral Large 2411", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/mistralai/voxtral-small-24b-...", label: "Mistralai/Voxtral Small 24B ...", description: "Input: text • Ctx: 31k" },
+    { value: "openrouter/moonshotai/kimi-k2", label: "Moonshotai/Kimi K2", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/moonshotai/kimi-k2-0905", label: "Moonshotai/Kimi K2 0905", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/moonshotai/kimi-k2-0905:exacto", label: "Moonshotai/Kimi K2 0905:Exacto", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/moonshotai/kimi-k2-thinking", label: "Moonshotai/Kimi K2 Thinking", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/moonshotai/kimi-k2.5", label: "Moonshotai/Kimi K2.5", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/nex-agi/deepseek-v3.1-nex-n1", label: "Nex Agi/Deepseek V3.1 Nex N1", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/nousresearch/deephermes-3-mi...", label: "Nousresearch/Deephermes 3 Mi...", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/nousresearch/hermes-4-70b", label: "Nousresearch/Hermes 4 70B", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/nvidia/llama-3.1-nemotron-70...", label: "Nvidia/Llama 3.1 Nemotron 70...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/nvidia/llama-3.3-nemotron-su...", label: "Nvidia/Llama 3.3 Nemotron Su...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/nvidia/nemotron-3-nano-30b-a...", label: "Nvidia/Nemotron 3 Nano 30B A...", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/nvidia/nemotron-3-nano-30b-a3b", label: "Nvidia/Nemotron 3 Nano 30B A3B", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/nvidia/nemotron-nano-12b-v2-...", label: "Nvidia/Nemotron Nano 12B V2 ...", description: "Input: text+image • Ctx: 125k" },
+    { value: "openrouter/nvidia/nemotron-nano-9b-v2", label: "Nvidia/Nemotron Nano 9B V2", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/nvidia/nemotron-nano-9b-v2:free", label: "Nvidia/Nemotron Nano 9B V2:Free", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/openai/gpt-3.5-turbo", label: "Openai/Gpt 3.5 Turbo", description: "Input: text • Ctx: 16k" },
+    { value: "openrouter/openai/gpt-3.5-turbo-0613", label: "Openai/Gpt 3.5 Turbo 0613", description: "Input: text • Ctx: 4k" },
+    { value: "openrouter/openai/gpt-3.5-turbo-16k", label: "Openai/Gpt 3.5 Turbo 16K", description: "Input: text • Ctx: 16k" },
+    { value: "openrouter/openai/gpt-oss-120b", label: "Openai/Gpt Oss 120B", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/gpt-oss-120b:exacto", label: "Openai/Gpt Oss 120B:Exacto", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/gpt-oss-120b:free", label: "Openai/Gpt Oss 120B:Free", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/gpt-oss-20b", label: "Openai/Gpt Oss 20B", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/gpt-oss-20b:free", label: "Openai/Gpt Oss 20B:Free", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/gpt-oss-safeguard-20b", label: "Openai/Gpt Oss Safeguard 20B", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/openai/o1", label: "Openai/O1", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o3", label: "Openai/O3", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o3-deep-research", label: "Openai/O3 Deep Research", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o3-mini", label: "Openai/O3 Mini", description: "Input: text • Ctx: 195k" },
+    { value: "openrouter/openai/o3-mini-high", label: "Openai/O3 Mini High", description: "Input: text • Ctx: 195k" },
+    { value: "openrouter/openai/o3-pro", label: "Openai/O3 Pro", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o4-mini", label: "Openai/O4 Mini", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o4-mini-deep-research", label: "Openai/O4 Mini Deep Research", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openai/o4-mini-high", label: "Openai/O4 Mini High", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/openrouter/aurora-alpha", label: "Openrouter/Aurora Alpha", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/openrouter/auto", label: "Openrouter/Auto", description: "Input: text+image • Ctx: 1953k" },
+    { value: "openrouter/openrouter/free", label: "Openrouter/Free", description: "Input: text+image • Ctx: 195k" },
+    { value: "openrouter/prime-intellect/intellect-3", label: "Prime Intellect/Intellect 3", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen-2.5-72b-instruct", label: "Qwen/Qwen 2.5 72B Instruct", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/qwen/qwen-2.5-7b-instruct", label: "Qwen/Qwen 2.5 7B Instruct", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/qwen/qwen-max", label: "Qwen/Qwen Max", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/qwen/qwen-plus", label: "Qwen/Qwen Plus", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/qwen/qwen-plus-2025-07-28", label: "Qwen/Qwen Plus 2025 07 28", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/qwen/qwen-plus-2025-07-28:th...", label: "Qwen/Qwen Plus 2025 07 28:Th...", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/qwen/qwen-turbo", label: "Qwen/Qwen Turbo", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen-vl-max", label: "Qwen/Qwen Vl Max", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-14b", label: "Qwen/Qwen3 14B", description: "Input: text • Ctx: 40k" },
+    { value: "openrouter/qwen/qwen3-235b-a22b", label: "Qwen/Qwen3 235B A22B", description: "Input: text • Ctx: 40k" },
+    { value: "openrouter/qwen/qwen3-235b-a22b-2507", label: "Qwen/Qwen3 235B A22B 2507", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-235b-a22b-thinkin...", label: "Qwen/Qwen3 235B A22B Thinkin...", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-30b-a3b", label: "Qwen/Qwen3 30B A3B", description: "Input: text • Ctx: 40k" },
+    { value: "openrouter/qwen/qwen3-30b-a3b-instruct-...", label: "Qwen/Qwen3 30B A3B Instruct ...", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-30b-a3b-thinking-...", label: "Qwen/Qwen3 30B A3B Thinking ...", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/qwen/qwen3-32b", label: "Qwen/Qwen3 32B", description: "Input: text • Ctx: 40k" },
+    { value: "openrouter/qwen/qwen3-4b", label: "Qwen/Qwen3 4B", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-4b:free", label: "Qwen/Qwen3 4B:Free", description: "Input: text • Ctx: 40k" },
+    { value: "openrouter/qwen/qwen3-8b", label: "Qwen/Qwen3 8B", description: "Input: text • Ctx: 31k" },
+    { value: "openrouter/qwen/qwen3-coder", label: "Qwen/Qwen3 Coder", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-coder-30b-a3b-ins...", label: "Qwen/Qwen3 Coder 30B A3B Ins...", description: "Input: text • Ctx: 156k" },
+    { value: "openrouter/qwen/qwen3-coder-flash", label: "Qwen/Qwen3 Coder Flash", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/qwen/qwen3-coder-next", label: "Qwen/Qwen3 Coder Next", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-coder-plus", label: "Qwen/Qwen3 Coder Plus", description: "Input: text • Ctx: 977k" },
+    { value: "openrouter/qwen/qwen3-coder:exacto", label: "Qwen/Qwen3 Coder:Exacto", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-coder:free", label: "Qwen/Qwen3 Coder:Free", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-max", label: "Qwen/Qwen3 Max", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-max-thinking", label: "Qwen/Qwen3 Max Thinking", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-next-80b-a3b-inst...", label: "Qwen/Qwen3 Next 80B A3B Inst...", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-next-80b-a3b-inst...", label: "Qwen/Qwen3 Next 80B A3B Inst...", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-next-80b-a3b-thin...", label: "Qwen/Qwen3 Next 80B A3B Thin...", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/qwen/qwen3-vl-235b-a22b-inst...", label: "Qwen/Qwen3 Vl 235B A22B Inst...", description: "Input: text+image • Ctx: 256k" },
+    { value: "openrouter/qwen/qwen3-vl-235b-a22b-thin...", label: "Qwen/Qwen3 Vl 235B A22B Thin...", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-vl-30b-a3b-instruct", label: "Qwen/Qwen3 Vl 30B A3B Instruct", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-vl-30b-a3b-thinking", label: "Qwen/Qwen3 Vl 30B A3B Thinking", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-vl-32b-instruct", label: "Qwen/Qwen3 Vl 32B Instruct", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-vl-8b-instruct", label: "Qwen/Qwen3 Vl 8B Instruct", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwen3-vl-8b-thinking", label: "Qwen/Qwen3 Vl 8B Thinking", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/qwen/qwq-32b", label: "Qwen/Qwq 32B", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/relace/relace-search", label: "Relace/Relace Search", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/sao10k/l3-euryale-70b", label: "Sao10K/L3 Euryale 70B", description: "Input: text • Ctx: 8k" },
+    { value: "openrouter/sao10k/l3.1-euryale-70b", label: "Sao10K/L3.1 Euryale 70B", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/stepfun/step-3.5-flash", label: "Stepfun/Step 3.5 Flash", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/stepfun/step-3.5-flash:free", label: "Stepfun/Step 3.5 Flash:Free", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/thedrummer/rocinante-12b", label: "Thedrummer/Rocinante 12B", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/thedrummer/unslopnemo-12b", label: "Thedrummer/Unslopnemo 12B", description: "Input: text • Ctx: 32k" },
+    { value: "openrouter/tngtech/deepseek-r1t2-chimera", label: "Tngtech/DeepSeek R1T2 Chimera", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/tngtech/tng-r1t-chimera", label: "Tngtech/Tng R1T Chimera", description: "Input: text • Ctx: 160k" },
+    { value: "openrouter/upstage/solar-pro-3:free", label: "Upstage/Solar Pro 3:Free", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/x-ai/grok-3", label: "X Ai/Grok 3", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/x-ai/grok-3-beta", label: "X Ai/Grok 3 Beta", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/x-ai/grok-3-mini", label: "X Ai/Grok 3 Mini", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/x-ai/grok-3-mini-beta", label: "X Ai/Grok 3 Mini Beta", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/x-ai/grok-4", label: "X Ai/Grok 4", description: "Input: text+image • Ctx: 250k" },
+    { value: "openrouter/x-ai/grok-4-fast", label: "X Ai/Grok 4 Fast", description: "Input: text+image • Ctx: 1953k" },
+    { value: "openrouter/x-ai/grok-4.1-fast", label: "X Ai/Grok 4.1 Fast", description: "Input: text+image • Ctx: 1953k" },
+    { value: "openrouter/x-ai/grok-code-fast-1", label: "X Ai/Grok Code Fast 1", description: "Input: text • Ctx: 250k" },
+    { value: "openrouter/xiaomi/mimo-v2-flash", label: "Xiaomi/Mimo V2 Flash", description: "Input: text • Ctx: 256k" },
+    { value: "openrouter/z-ai/glm-4-32b", label: "Z Ai/Glm 4 32B", description: "Input: text • Ctx: 125k" },
+    { value: "openrouter/z-ai/glm-4.5", label: "Z Ai/Glm 4.5", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/z-ai/glm-4.5-air", label: "Z Ai/Glm 4.5 Air", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/z-ai/glm-4.5-air:free", label: "Z Ai/Glm 4.5 Air:Free", description: "Input: text • Ctx: 128k" },
+    { value: "openrouter/z-ai/glm-4.5v", label: "Z Ai/Glm 4.5V", description: "Input: text+image • Ctx: 64k" },
+    { value: "openrouter/z-ai/glm-4.6", label: "Z Ai/Glm 4.6", description: "Input: text • Ctx: 198k" },
+    { value: "openrouter/z-ai/glm-4.6:exacto", label: "Z Ai/Glm 4.6:Exacto", description: "Input: text • Ctx: 200k" },
+    { value: "openrouter/z-ai/glm-4.6v", label: "Z Ai/Glm 4.6V", description: "Input: text+image • Ctx: 128k" },
+    { value: "openrouter/z-ai/glm-4.7", label: "Z Ai/Glm 4.7", description: "Input: text • Ctx: 198k" },
+    { value: "openrouter/z-ai/glm-4.7-flash", label: "Z Ai/Glm 4.7 Flash", description: "Input: text • Ctx: 198k" },
+    { value: "openrouter/z-ai/glm-5", label: "Z Ai/Glm 5", description: "Input: text • Ctx: 198k" },
   ],
   "xai": [
-    { value: "xai/grok-3", label: "Grok-3" },
-    { value: "xai/grok-3-mini", label: "Grok-3 Mini" },
-    { value: "xai/grok-4", label: "Grok-4" },
-    { value: "xai/grok-2-latest", label: "Grok-2" },
-    { value: "xai/grok-code-fast-1", label: "Grok Code Fast" },
+    { value: "xai/grok-4", label: "Grok 4", description: "Input: text+image • Ctx: 250k" },
+    { value: "xai/grok-4-1-fast", label: "Grok 4 1 Fast", description: "Input: text+image • Ctx: 1953k" },
+    { value: "xai/grok-4-1-fast-non-reasoning", label: "Grok 4 1 Fast Non Reasoning", description: "Input: text+image • Ctx: 1953k" },
+    { value: "xai/grok-4-fast", label: "Grok 4 Fast", description: "Input: text+image • Ctx: 1953k" },
+    { value: "xai/grok-4-fast-non-reasoning", label: "Grok 4 Fast Non Reasoning", description: "Input: text+image • Ctx: 1953k" },
   ],
-  "zai": [
-    { value: "zai/glm-4.7", label: "GLM 4.7" },
-    { value: "zai/glm-4.6", label: "GLM 4.6" },
-    { value: "zai/glm-4.5-air", label: "GLM 4.5 Air" },
-  ],
-  "ollama": [
-    { value: "ollama/llama3.1", label: "Llama 3.1 (Local)" },
-    { value: "ollama/deepseek-r1", label: "DeepSeek R1 (Local)" },
-  ]
 };
 
 // Reusable Radio Card Component
@@ -1264,9 +1344,7 @@ Managed by ClawSetup.`,
     return "";
   };
 
-  const isOAuthMethod = (method: string) => {
-    return ["antigravity", "gemini_cli", "codex"].includes(method);
-  };
+
 
   const currentPayload = constructConfigPayload();
   const initialPayload = transformInitialToPayload(initialConfigRef.current);
@@ -1849,17 +1927,9 @@ Managed by ClawSetup.`,
                     { value: "anthropic", label: "Anthropic", icon: PROVIDER_LOGOS["anthropic"] },
                     { value: "openai", label: "OpenAI", icon: PROVIDER_LOGOS["openai"] },
                     { value: "google", label: "Google Gemini", icon: PROVIDER_LOGOS["google"] },
+                    { value: "google-vertex", label: "Google Vertex AI", icon: PROVIDER_LOGOS["google-vertex"] },
                     { value: "openrouter", label: "OpenRouter", icon: PROVIDER_LOGOS["openrouter"] },
-                    { value: "ollama", label: "Ollama (Local)", icon: PROVIDER_LOGOS["ollama"] },
-                    // Others sorted alphabetically
-                    ...Object.keys(MODELS_BY_PROVIDER)
-                      .filter(p => !["anthropic", "openai", "google", "openrouter", "ollama"].includes(p))
-                      .sort()
-                      .map(p => ({
-                        value: p,
-                        label: p.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-                        icon: PROVIDER_LOGOS[p]
-                      }))
+                    { value: "xai", label: "xAI (Grok)", icon: PROVIDER_LOGOS["xai"] },
                   ]}
                 />
               </div>
@@ -1877,13 +1947,10 @@ Managed by ClawSetup.`,
                     { value: "setup-token", label: "Anthropic Token (from setup-token)", description: "Temporary token from CLI setup" }
                   ] : []),
                   ...(provider === "google" ? [
-                    { value: "token", label: "Google Gemini API Key", description: "Standard API Key" },
-                    { value: "antigravity", label: "Google Antigravity OAuth", description: "Sign in with Google" },
-                    { value: "gemini_cli", label: "Google Gemini CLI OAuth", description: "Sign in via CLI" }
+                    { value: "token", label: "Google Gemini API Key", description: "Standard API Key" }
                   ] : []),
                   ...(provider === "openai" ? [
-                    { value: "token", label: "OpenAI API Key", description: "Standard API Key starting with sk-..." },
-                    { value: "codex", label: "OpenAI Codex (ChatGPT OAuth)", description: "Sign in with OpenAI account" }
+                    { value: "token", label: "OpenAI API Key", description: "Standard API Key starting with sk-..." }
                   ] : []),
                   ...(!["anthropic", "google", "openai"].includes(provider) ? [
                      { value: "token", label: "API Key (Standard)", description: "Standard API Key for this provider" }
@@ -1900,7 +1967,7 @@ Managed by ClawSetup.`,
                      value={model}
                      onChange={setModel}
                      columns={1}
-                     options={MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label }))}
+                     options={MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label, description: m.description }))}
                    />
                  </div>
               ) : (
@@ -1918,7 +1985,6 @@ Managed by ClawSetup.`,
               )}
             </div>
 
-            {!isOAuthMethod(authMethod) && (
               <div className="form-group" style={{marginTop: "1.5rem"}}>
                 <label>{authMethod === "setup-token" ? "Anthropic Setup Token" : "API Key"}</label>
                 <input 
@@ -1933,28 +1999,9 @@ Managed by ClawSetup.`,
                   </p>
                 )}
               </div>
-            )}
-
-            {isOAuthMethod(authMethod) && (
-              <div style={{marginTop: "1.5rem"}}>
-                <button className="primary" style={{width: "100%"}} disabled={loading} onClick={async () => {
-                  setLoading(true);
-                  try {
-                    const res: string = await invoke("start_provider_auth", { provider, method: authMethod });
-                    setApiKey(res);
-                  } catch (e) { 
-                    setLogs("Auth Error: " + e);
-                  }
-                  setLoading(false);
-                }}>
-                  {loading ? "Waiting for Browser..." : "Launch Browser Login"}
-                </button>
-                <p className="input-hint">A browser window will open to complete the authentication.</p>
-              </div>
-            )}
 
             <div className="button-group">
-              <button className="primary" disabled={!isOAuthMethod(authMethod) && !apiKey} onClick={() => setStep(9)}>Next</button>
+              <button className="primary" disabled={!apiKey} onClick={() => setStep(9)}>Next</button>
               <button className="secondary" onClick={() => setStep(mode === "advanced" ? 7 : 6)}>Back</button>
             </div>
           </div>

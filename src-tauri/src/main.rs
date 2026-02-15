@@ -891,23 +891,8 @@ async fn get_remote_gateway_token(remote: RemoteInfo) -> Result<String, String> 
 }
 
 #[command]
-fn start_provider_auth(provider: String, method: String) -> Result<String, String> {
-    let cmd = format!("openclaw models auth login --provider {} --method {}", provider, method);
-    shell_command(&cmd)?;
-    
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let profile_name = format!("{}:default", provider);
-    let auth_path = home.join(".openclaw").join("agents").join("main").join("agent").join("auth-profiles.json");
-    
-    if auth_path.exists() {
-        let content = fs::read_to_string(auth_path).map_err(|e| e.to_string())?;
-        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-        if let Some(token) = json.get("profiles").and_then(|p| p.get(&profile_name)).and_then(|p| p.get("token")).and_then(|t| t.as_str()) {
-            return Ok(token.to_string());
-        }
-    }
-    
-    Ok("Authenticated via browser. Token synced.".to_string())
+fn start_provider_auth(_provider: String, _method: String) -> Result<String, String> {
+    Err("OAuth authentication has been disabled.".to_string())
 }
 
 #[command]
