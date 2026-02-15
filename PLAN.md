@@ -37,7 +37,9 @@
     - [x] Create Rust unit test for `CurrentConfig` deserialization.
     - [x] Run `cargo test`.
     - [x] Verify build with `cargo check`.
-    - [ ] Run `npm run tauri dev` (briefly) to ensure frontend builds.
+    - [x] Run `npm run tauri dev` (briefly) to ensure frontend builds.
 
-- [ ] **Completion**
-    - [ ] Git commit and push.
+- [x] **Completion**
+    - [x] Fix "Finish Installation" navigation and redundant install.
+    - [x] Git commit and push.
+    - [x] Cleanup git repository (remove build artifacts and add .gitignore).

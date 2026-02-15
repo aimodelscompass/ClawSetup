@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open } from "@tauri-apps/api/shell";
 import { open as openDialog } from "@tauri-apps/api/dialog";
@@ -319,6 +319,7 @@ function RadioCard({
 function App() {
   const [step, setStep] = useState(0.5); // Start at Welcome page
   const [mode, setMode] = useState("basic"); // "basic" or "advanced"
+  const initialConfigRef = useRef<any>(null);
   
   // Environment selection
   const [targetEnvironment, setTargetEnvironment] = useState("local");
@@ -712,12 +713,143 @@ function App() {
     setSavingWorkspace(false);
   }
 
+  // Helper to deep compare two objects
+  function isDeepEqual(obj1: any, obj2: any) {
+    return JSON.stringify(obj1) === JSON.stringify(obj2);
+  }
+
+  // Helper to transform the loaded config (from get_current_config) 
+  // into the structure expected by configure_agent, for comparison.
+  function transformInitialToPayload(initial: any) {
+    if (!initial) return null;
+    const defaultIdentity = `# IDENTITY.md - Who Am I?
+- **Name:** ${initial.agent_name}
+- **Vibe:** ${initial.agent_vibe}
+- **Emoji:** ${initial.agent_emoji || "🦞"}
+---
+Managed by ClawSetup.`;
+
+    const mappedSandboxMode = initial.sandbox_mode === "full" ? "all" : (initial.sandbox_mode === "partial" ? "non-main" : (initial.sandbox_mode === "none" ? "off" : initial.sandbox_mode));
+
+    return {
+      provider: initial.provider,
+      api_key: initial.api_key,
+      auth_method: initial.auth_method,
+      model: initial.model,
+      user_name: initial.user_name,
+      agent_name: initial.agent_name,
+      agent_vibe: initial.agent_vibe,
+      telegram_token: initial.telegram_token || "",
+      gateway_port: initial.gateway_port,
+      gateway_bind: initial.gateway_bind,
+      gateway_auth_mode: initial.gateway_auth_mode,
+      tailscale_mode: initial.tailscale_mode,
+      node_manager: initial.node_manager,
+      skills: initial.skills || [],
+      service_keys: initial.service_keys || {},
+      sandbox_mode: mappedSandboxMode, // Need to match what handleInstall produces
+      tools_mode: initial.tools_mode,
+      allowed_tools: initial.allowed_tools || [],
+      denied_tools: initial.denied_tools || [],
+      fallback_models: initial.fallback_models || [],
+      heartbeat_mode: initial.heartbeat_mode,
+      idle_timeout_ms: initial.idle_timeout_ms,
+      identity_md: initial.identity_md || defaultIdentity,
+      user_md: initial.user_md || null, 
+      soul_md: initial.soul_md || null,
+      agents: initial.enable_multi_agent && initial.agent_configs ? initial.agent_configs.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        model: a.model,
+        fallback_models: a.fallback_models || null,
+        skills: a.skills || null,
+        vibe: a.vibe,
+        identity_md: a.identity_md || `# IDENTITY.md - Who Am I?
+- **Name:** ${a.name}
+- **Vibe:** ${a.vibe}
+- **Emoji:** ${a.emoji || "🦞"}
+---
+Managed by ClawSetup.`,
+        user_md: a.user_md || null,
+        soul_md: a.soul_md || null
+      })) : null,
+      preserve_state: isPaired
+    };
+  }
+
   async function handleInstall() {
     setLoading(true);
     setError(false);
     setProgress("Starting setup...");
 
     const mappedSandboxMode = sandboxMode === "full" ? "all" : (sandboxMode === "partial" ? "non-main" : "off");
+
+    const defaultIdentity = `# IDENTITY.md - Who Am I?
+- **Name:** ${agentName}
+- **Vibe:** ${agentVibe}
+- **Emoji:** ${agentEmoji}
+---
+Managed by ClawSetup.`;
+
+    const configPayload = {
+        provider,
+        api_key: apiKey,
+        auth_method: authMethod,
+        model,
+        user_name: userName,
+        agent_name: agentName,
+        agent_vibe: agentVibe,
+        telegram_token: telegramToken,
+        gateway_port: gatewayPort,
+        gateway_bind: gatewayBind,
+        gateway_auth_mode: gatewayAuthMode,
+        tailscale_mode: tailscaleMode,
+        node_manager: nodeManager,
+        skills: selectedSkills,
+        service_keys: serviceKeys,
+        sandbox_mode: mode === "advanced" ? mappedSandboxMode : null,
+        tools_mode: mode === "advanced" ? toolsMode : null,
+        allowed_tools: mode === "advanced" && toolsMode === "allowlist" ? allowedTools : null,
+        denied_tools: mode === "advanced" && toolsMode === "denylist" ? deniedTools : null,
+        fallback_models: mode === "advanced" && enableFallbacks ? fallbackModels.filter(m => m) : null,
+        heartbeat_mode: mode === "advanced" ? heartbeatMode : null,
+        idle_timeout_ms: mode === "advanced" && heartbeatMode === "idle" ? idleTimeoutMs : null,
+        identity_md: (mode === "advanced" && identityMd) ? identityMd : defaultIdentity,
+        user_md: mode === "advanced" && userMd ? userMd : null,
+        soul_md: mode === "advanced" && soulMd ? soulMd : null,
+        agents: enableMultiAgent ? agentConfigs.map(a => ({
+            id: a.id,
+            name: a.name,
+            model: a.model,
+            fallback_models: a.fallbackModels.length > 0 ? a.fallbackModels : null,
+            skills: a.skills.length > 0 ? a.skills : null,
+            vibe: a.vibe,
+            identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
+- **Name:** ${a.name}
+- **Vibe:** ${a.vibe}
+- **Emoji:** ${a.emoji || "🦞"}
+---
+Managed by ClawSetup.`,
+            user_md: a.userMd || null,
+            soul_md: a.soulMd || null
+        })) : null,
+        preserve_state: isPaired
+    };
+
+    if (initialConfigRef.current) {
+        const initialPayload = transformInitialToPayload(initialConfigRef.current);
+        // We use JSON stringify for deep comparison which is simple but effective for this structure
+        if (isDeepEqual(initialPayload, configPayload)) {
+             setProgress("Configuration unchanged. Skipping installation...");
+             setLogs("Configuration unchanged.");
+             // Use a small delay to show the message
+             setTimeout(() => {
+                 setLoading(false);
+                 setStep(17);
+             }, 800);
+             return;
+        }
+    }
 
     try {
       if (targetEnvironment === "cloud") {
@@ -732,66 +864,9 @@ function App() {
           privateKeyPath: remotePrivateKeyPath || null
         };
 
-        const defaultIdentity = `# IDENTITY.md - Who Am I?
-- **Name:** ${agentName}
-- **Vibe:** ${agentVibe}
-- **Emoji:** ${agentEmoji}
----
-Managed by ClawSetup.`;
-
         await invoke("setup_remote_openclaw", {
           remote: remoteConfig,
-          config: {
-            provider,
-            api_key: apiKey,
-            auth_method: authMethod,
-            model,
-            user_name: userName,
-            agent_name: agentName,
-            agent_vibe: agentVibe,
-            telegram_token: telegramToken,
-            // Gateway settings
-            gateway_port: gatewayPort,
-            gateway_bind: gatewayBind,
-            gateway_auth_mode: gatewayAuthMode,
-            tailscale_mode: tailscaleMode,
-            // Runtime settings
-            node_manager: nodeManager,
-            skills: selectedSkills,
-            service_keys: serviceKeys,
-            // Advanced security settings
-            sandbox_mode: mode === "advanced" ? sandboxMode : null,
-            tools_mode: mode === "advanced" ? toolsMode : null,
-            allowed_tools: mode === "advanced" && toolsMode === "allowlist" ? allowedTools : null,
-            denied_tools: mode === "advanced" && toolsMode === "denylist" ? deniedTools : null,
-            // Fallback models
-            fallback_models: mode === "advanced" && enableFallbacks ? fallbackModels.filter(m => m) : null,
-            // Session management
-            heartbeat_mode: mode === "advanced" ? heartbeatMode : null,
-            idle_timeout_ms: mode === "advanced" && heartbeatMode === "idle" ? idleTimeoutMs : null,
-            // Workspace customization
-            identity_md: (mode === "advanced" && identityMd) ? identityMd : defaultIdentity,
-            user_md: mode === "advanced" && userMd ? userMd : null,
-            soul_md: mode === "advanced" && soulMd ? soulMd : null,
-            // Multi-agent support
-            agents: enableMultiAgent ? agentConfigs.map(a => ({
-              id: a.id,
-              name: a.name,
-              model: a.model,
-              fallback_models: a.fallbackModels.length > 0 ? a.fallbackModels : null,
-              skills: a.skills.length > 0 ? a.skills : null,
-              vibe: a.vibe,
-              identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
-- **Name:** ${a.name}
-- **Vibe:** ${a.vibe}
-- **Emoji:** ${a.emoji || "🦞"}
----
-Managed by ClawSetup.`,
-              user_md: a.userMd || null,
-              soul_md: a.soulMd || null
-            })) : null,
-            preserve_state: isPaired
-          }
+          config: configPayload
         });
 
         // Install skills on remote server
@@ -868,60 +943,8 @@ Managed by ClawSetup.`,
         setProgress("Configuring agent...");
         setLogs("Configuring...");
 
-        const defaultIdentity = `# IDENTITY.md - Who Am I?
-- **Name:** ${agentName}
-- **Vibe:** ${agentVibe}
-- **Emoji:** ${agentEmoji}
----
-Managed by ClawSetup.`;
-
         await invoke("configure_agent", {
-          config: {
-            provider,
-            api_key: apiKey,
-            auth_method: authMethod,
-            model,
-            user_name: userName,
-            agent_name: agentName,
-            agent_vibe: agentVibe,
-            telegram_token: telegramToken,
-            gateway_port: gatewayPort,
-            gateway_bind: gatewayBind,
-            gateway_auth_mode: gatewayAuthMode,
-            tailscale_mode: tailscaleMode,
-            node_manager: nodeManager,
-            skills: selectedSkills,
-            service_keys: serviceKeys,
-            // NEW: Advanced settings
-            sandbox_mode: mode === "advanced" ? mappedSandboxMode : null,
-            tools_mode: mode === "advanced" ? toolsMode : null,
-            allowed_tools: mode === "advanced" && toolsMode === "allowlist" ? allowedTools : null,
-            denied_tools: mode === "advanced" && toolsMode === "denylist" ? deniedTools : null,
-            fallback_models: mode === "advanced" && enableFallbacks ? fallbackModels.filter(m => m) : null,
-            heartbeat_mode: mode === "advanced" ? heartbeatMode : null,
-            idle_timeout_ms: mode === "advanced" && heartbeatMode === "idle" ? idleTimeoutMs : null,
-            identity_md: (mode === "advanced" && identityMd) ? identityMd : defaultIdentity,
-            user_md: mode === "advanced" && userMd ? userMd : null,
-            soul_md: mode === "advanced" && soulMd ? soulMd : null,
-            // Multi-agent support
-            agents: enableMultiAgent ? agentConfigs.map(a => ({
-              id: a.id,
-              name: a.name,
-              model: a.model,
-              fallback_models: a.fallbackModels.length > 0 ? a.fallbackModels : null,
-              skills: a.skills.length > 0 ? a.skills : null,
-              vibe: a.vibe,
-              identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
-- **Name:** ${a.name}
-- **Vibe:** ${a.vibe}
-- **Emoji:** ${a.emoji || "🦞"}
----
-Managed by ClawSetup.`,
-              user_md: a.userMd || null,
-              soul_md: a.soulMd || null
-            })) : null,
-            preserve_state: isPaired
-          }
+          config: configPayload
         });
 
         for (const skill of selectedSkills) {
@@ -1047,6 +1070,7 @@ Managed by ClawSetup.`,
       } : null;
 
       const config: any = await invoke("get_current_config", { remote: remoteConfig });
+      initialConfigRef.current = config;
       
       // Populate state
       setProvider(config.provider);
@@ -2377,6 +2401,26 @@ Managed by ClawSetup.`,
               </button>
               <button className="secondary" onClick={() => setStep(14)} disabled={loading}>Back</button>
             </div>
+
+            {(loading || error || (progress && progress.includes("unchanged"))) && (
+              <div className="progress-container" style={{marginTop: "2rem"}}>
+                {loading && (
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{width: progress.includes("Gateway") ? "80%" : (progress.includes("skill") ? "50%" : "20%")}} />
+                  </div>
+                )}
+                <p style={{fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)"}}>{error ? "Installation Failed" : progress}</p>
+                <div className="logs-container">
+                  <pre>{logs}</pre>
+                </div>
+              </div>
+            )}
+            
+            {error && (
+              <div style={{marginTop: "2rem"}}>
+                <button className="primary" style={{backgroundColor: "var(--error)", width: "100%"}} onClick={() => invoke("close_app")}>Exit Installation</button>
+              </div>
+            )}
           </div>
         );
       case 15.5:
@@ -2708,6 +2752,26 @@ Managed by ClawSetup.`,
                 }
               }} disabled={loading}>Back</button>
             </div>
+
+            {(loading || error || (progress && progress.includes("unchanged"))) && (
+              <div className="progress-container" style={{marginTop: "2rem"}}>
+                {loading && (
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{width: progress.includes("Gateway") ? "80%" : (progress.includes("skill") ? "50%" : "20%")}} />
+                  </div>
+                )}
+                <p style={{fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)"}}>{error ? "Installation Failed" : progress}</p>
+                <div className="logs-container">
+                  <pre>{logs}</pre>
+                </div>
+              </div>
+            )}
+            
+            {error && (
+              <div style={{marginTop: "2rem"}}>
+                <button className="primary" style={{backgroundColor: "var(--error)", width: "100%"}} onClick={() => invoke("close_app")}>Exit Installation</button>
+              </div>
+            )}
           </div>
         );
 
