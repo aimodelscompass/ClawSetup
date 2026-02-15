@@ -44,5 +44,8 @@
     - [x] Create "Review" page (Step 16) to display change status before finishing.
     - [x] Update UI to show "Finish" instead of "Finish Installation" when no changes are detected.
     - [x] Hide pairing code input if agent is already paired.
+    - [x] Fix false positive change detection (robust deep comparison).
+    - [x] Update progress text for reconfigure/update flow.
+    - [x] Fix tunnel verification failure (added retry loop).
     - [x] Git commit and push.
     - [x] Cleanup git repository (remove build artifacts and add .gitignore).

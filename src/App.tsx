@@ -714,9 +714,26 @@ function App() {
     setSavingWorkspace(false);
   }
 
-  // Helper to deep compare two objects
+  // Helper to deep compare two objects (robust to key order)
   function isDeepEqual(obj1: any, obj2: any) {
-    return JSON.stringify(obj1) === JSON.stringify(obj2);
+    if (obj1 === obj2) return true;
+    if (typeof obj1 !== "object" || obj1 === null || typeof obj2 !== "object" || obj2 === null) {
+      return false;
+    }
+
+    if (Array.isArray(obj1) !== Array.isArray(obj2)) return false;
+
+    const keys1 = Object.keys(obj1).sort();
+    const keys2 = Object.keys(obj2).sort();
+
+    if (keys1.length !== keys2.length) return false;
+
+    for (let i = 0; i < keys1.length; i++) {
+      if (keys1[i] !== keys2[i]) return false;
+      if (!isDeepEqual(obj1[keys1[i]], obj2[keys2[i]])) return false;
+    }
+
+    return true;
   }
 
   // Helper to transform the loaded config (from get_current_config) 
@@ -836,19 +853,20 @@ Managed by ClawSetup.`,
   async function handleInstall() {
     setLoading(true);
     setError(false);
-    setProgress("Starting setup...");
+    
+    const isUpdate = !!initialConfigRef.current;
+    setProgress(isUpdate ? "Applying changes..." : "Starting setup...");
 
     const configPayload = constructConfigPayload();
 
     if (initialConfigRef.current) {
         const initialPayload = transformInitialToPayload(initialConfigRef.current);
         if (isDeepEqual(initialPayload, configPayload)) {
-             setProgress("Configuration unchanged. Skipping installation...");
-             setLogs("Configuration unchanged.");
+             setProgress("Configuration unchanged.");
              setTimeout(() => {
                  setLoading(false);
                  setStep(17);
-             }, 800);
+             }, 500);
              return;
         }
     }
@@ -856,8 +874,8 @@ Managed by ClawSetup.`,
     try {
       if (targetEnvironment === "cloud") {
         // Remote installation flow
-        setProgress("Setting up OpenClaw on remote server...");
-        setLogs("Installing OpenClaw on remote server...");
+        setProgress(isUpdate ? "Updating remote configuration..." : "Setting up OpenClaw on remote server...");
+        setLogs(isUpdate ? "Updating remote configuration..." : "Installing OpenClaw on remote server...");
 
         const remoteConfig = {
           ip: remoteIp,

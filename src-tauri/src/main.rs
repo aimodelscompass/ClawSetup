@@ -1446,35 +1446,46 @@ fn get_dashboard_url(is_remote: bool, remote: Option<RemoteInfo>) -> Result<Stri
 
 #[command]
 fn verify_tunnel_connectivity(remote: RemoteInfo) -> Result<bool, String> {
-    thread::sleep(Duration::from_secs(2));
+    // Retry loop: 5 attempts, 2 seconds between each
+    for _ in 0..5 {
+        thread::sleep(Duration::from_secs(2));
 
-    if TcpStream::connect("127.0.0.1:18789").is_err() {
-        return Ok(false);
+        if TcpStream::connect("127.0.0.1:18789").is_err() {
+            continue;
+        }
+        
+        // Get token (this is expensive to do every loop, but safe)
+        let sess = match connect_ssh(&remote) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let content = match execute_ssh(&sess, "cat ~/.openclaw/openclaw.json") {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(token) = json.get("gateway")
+                .and_then(|g| g.get("auth"))
+                .and_then(|a| a.get("token"))
+                .and_then(|t| t.as_str()) 
+            {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
+                let url = format!("http://127.0.0.1:18789/?token={}", token);
+                if let Ok(resp) = client.head(&url).send() {
+                    if resp.status().is_success() || resp.status().is_redirection() {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
     }
     
-    // Get token
-    let sess = connect_ssh(&remote)?;
-    let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
-    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    
-    let token = json.get("gateway")
-        .and_then(|g| g.get("auth"))
-        .and_then(|a| a.get("token"))
-        .and_then(|t| t.as_str())
-        .ok_or("Could not find gateway token in remote config")?;
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let url = format!("http://127.0.0.1:18789/?token={}", token);
-    let response = client.head(&url).send();
-
-    match response {
-        Ok(resp) => Ok(resp.status().is_success() || resp.status().is_redirection()),
-        Err(_) => Ok(false)
-    }
+    Ok(false)
 }
 
 fn shell_command(cmd: &str) -> Result<String, String> {
