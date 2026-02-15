@@ -48,5 +48,6 @@
     - [x] Update progress text for reconfigure/update flow.
     - [x] Fix tunnel verification failure (added retry loop).
     - [x] Double-check pairing status at completion step (via CLI command).
+    - [x] Explicitly set 'allow' policy when preserving state to prevent reversion to pairing mode.
     - [x] Git commit and push.
     - [x] Cleanup git repository (remove build artifacts and add .gitignore).

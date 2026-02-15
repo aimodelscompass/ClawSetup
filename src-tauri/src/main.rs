@@ -546,6 +546,10 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
                     if let Some(c) = channel_config.as_object_mut() {
                         c.insert("dmPolicy".to_string(), serde_json::Value::String("pairing".to_string()));
                     }
+                } else {
+                    if let Some(c) = channel_config.as_object_mut() {
+                        c.insert("dmPolicy".to_string(), serde_json::Value::String("allow".to_string()));
+                    }
                 }
 
                 obj.insert("channels".to_string(), serde_json::json!({
@@ -1242,6 +1246,8 @@ Serve {}."#, config.user_name)
             // Only reset dmPolicy to pairing if we are NOT preserving state
             if config.preserve_state != Some(true) {
                 let _ = shell_command("openclaw config set channels.telegram.accounts.main.dmPolicy pairing");
+            } else {
+                let _ = shell_command("openclaw config set channels.telegram.accounts.main.dmPolicy allow");
             }
             let _ = shell_command("openclaw config set channels.telegram.accounts.main.name \"Primary Bot\"");
         }
