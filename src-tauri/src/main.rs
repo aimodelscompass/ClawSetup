@@ -1530,6 +1530,32 @@ fn shell_command(cmd: &str) -> Result<String, String> {
 }
 
 #[command]
+fn check_pairing_status(remote: Option<RemoteInfo>) -> Result<bool, String> {
+    // Check dmPolicy via CLI to get actual active state
+    let cmd = "openclaw config get channels.telegram.accounts.main.dmPolicy";
+    let output = if let Some(r) = remote {
+        let sess = connect_ssh(&r)?;
+        execute_ssh(&sess, cmd)
+    } else {
+        shell_command(cmd)
+    };
+
+    match output {
+        Ok(policy) => {
+            // If policy is NOT "pairing", assume paired/configured
+            let p = policy.trim().trim_matches('"');
+            Ok(p != "pairing")
+        },
+        Err(_) => {
+            // If command fails, fallback to assuming not paired or error
+            // But if it fails, maybe openclaw isn't running or config is bad.
+            // Let's return false to be safe (ask to pair).
+            Ok(false)
+        }
+    }
+}
+
+#[command]
 async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig, String> {
     // Helper to extract values from markdown
     fn extract_md_value(content: &str, key: &str) -> String {
@@ -1800,7 +1826,8 @@ fn main() {
             update_remote_openclaw,
             get_remote_gateway_token,
             verify_tunnel_connectivity,
-            get_current_config
+            get_current_config,
+            check_pairing_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

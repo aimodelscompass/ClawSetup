@@ -509,6 +509,24 @@ function App() {
   useEffect(() => { checkSystem(true); }, []);
 
   useEffect(() => {
+    if (step === 17) {
+      const checkPairing = async () => {
+        try {
+           const remoteConfig = targetEnvironment === "cloud" ? {
+             ip: remoteIp,
+             user: remoteUser,
+             password: remotePassword || null,
+             privateKeyPath: remotePrivateKeyPath || null
+           } : null;
+           const status: boolean = await invoke("check_pairing_status", { remote: remoteConfig });
+           if (status) setIsPaired(true);
+        } catch(e) { console.error("Failed to check pairing status:", e); }
+      };
+      checkPairing();
+    }
+  }, [step]);
+
+  useEffect(() => {
     if (theme === "light") {
       document.body.classList.add("light-theme");
     } else {
