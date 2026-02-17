@@ -522,6 +522,15 @@ function RadioCard({
 }
 
 function App() {
+  const handleAdvancedTransition = async () => {
+    // Check if we already verified license in this session
+    if (maintCompleted) {
+       setStep(7);
+       return;
+    }
+    setShowLicenseModal(true);
+  };
+
   const [step, setStep] = useState(0.5); // Start at Welcome page
   const [mode, setMode] = useState("basic"); // "basic" or "advanced"
   const initialConfigRef = useRef<any>(null);
@@ -564,6 +573,12 @@ function App() {
   const [selectedMaint, setSelectedMaint] = useState<string>("repair");
   const [maintCompleted, setMaintCompleted] = useState(false);
 
+  // License
+  const [showLicenseModal, setShowLicenseModal] = useState(false);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [verifyingLicense, setVerifyingLicense] = useState(false);
+  const [licenseError, setLicenseError] = useState("");
+
   // Service Keys State
   const [serviceKeys, setServiceKeys] = useState<Record<string, string>>({});
   const [currentServiceIdx, setCurrentServiceIdx] = useState(0);
@@ -587,7 +602,7 @@ function App() {
   const [skipBasicConfig, setSkipBasicConfig] = useState(false);
 
   // NEW: Security Best Practices (Step 11)
-  const [sandboxMode, setSandboxMode] = useState("full");
+  const [sandboxMode, setSandboxMode] = useState("none");
   const [toolsMode, setToolsMode] = useState("allowlist");
   const [allowedTools, setAllowedTools] = useState<string[]>(["filesystem", "terminal", "browser"]);
   const [deniedTools, setDeniedTools] = useState<string[]>([]);
@@ -1615,7 +1630,7 @@ Managed by ClawSetup.`,
                       if (loaded) {
                          // Go to Configuration Mode (Step 3 or 5 depending on preference)
                          // Step 3 is security check, usually good to show again.
-                         setStep(3); 
+                         setMode("advanced"); setStep(6); 
                       }
                     } else if (selectedMaint === "uninstall") {
                       if (confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?")) {
@@ -1953,8 +1968,8 @@ Managed by ClawSetup.`,
               />
             </div>
             <div className="button-group">
-              <button className="primary" disabled={!agentName} onClick={() => setStep(mode === "advanced" ? 7 : 8)}>Next</button>
-              <button className="secondary" onClick={() => setStep(5)}>Back</button>
+              <button className="primary" disabled={!agentName} onClick={() => setStep(8)}>Next</button>
+              <button className="secondary" onClick={() => setStep(skipBasicConfig ? 0 : 5)}>Back</button>
             </div>
           </div>
         );
@@ -2005,11 +2020,7 @@ Managed by ClawSetup.`,
             </div>
             <div className="button-group">
               <button className="primary" onClick={() => {
-                if (skipBasicConfig) {
-                  setStep(10);
-                } else {
-                  setStep(8);
-                }
+                setStep(10);
               }}>Continue</button>
               <button className="secondary" onClick={() => setStep(6)}>Back</button>
             </div>
@@ -2111,8 +2122,12 @@ Managed by ClawSetup.`,
                 )}
               </div>
 
+            
+            <p className="input-hint" style={{marginBottom: "1rem", textAlign: "center"}}>
+              You can skip this for now and configure it later via 'Reconfigure'.
+            </p>
             <div className="button-group">
-              <button className="primary" disabled={!apiKey} onClick={() => setStep(9)}>Next</button>
+              <button className="primary" onClick={() => setStep(9)}>Next</button>
               <button className="secondary" onClick={() => setStep(mode === "advanced" ? 7 : 6)}>Back</button>
             </div>
           </div>
@@ -2130,7 +2145,7 @@ Managed by ClawSetup.`,
             
             <div className="button-group">
               <button className="primary" onClick={() => {
-                if (mode === "advanced") setStep(10);
+                if (mode === "advanced" || skipBasicConfig) handleAdvancedTransition();
                 else setStep(16);
               }} disabled={loading}>
                 {mode === "advanced" ? "Continue" : "Next"}
@@ -2378,7 +2393,7 @@ Managed by ClawSetup.`,
                 onChange={setSandboxMode}
                 columns={1}
                 options={[
-                  { value: "full", label: "Full Sandbox (Recommended)", description: "Maximum isolation for agent operations." },
+                  { value: "full", label: "Full Sandbox", description: "REQUIRES DOCKER! Select only if Docker is installed, otherwise this will break." },
                   { value: "partial", label: "Partial Sandbox", description: "Standard isolation." },
                   { value: "none", label: "No Sandbox", description: "Unrestricted access." }
                 ]}
@@ -3174,7 +3189,7 @@ case 16:
                     ? `Remote gateway (${remoteIp}:18789) is forwarded to localhost:18789`
                     : "SSH tunnel is not active"}
                 </p>
-                {tunnelActive && (
+                {tunnelActive ? (
                   <button
                     className="secondary"
                     style={{marginTop: "1rem", width: "100%"}}
@@ -3189,20 +3204,22 @@ case 16:
                   >
                     Stop SSH Tunnel
                   </button>
+                ) : (
+                  <button
+                    className="primary"
+                    style={{marginTop: "1rem", width: "100%"}}
+                    onClick={() => handleToggleTunnel()}
+                  >
+                    Establish SSH Tunnel
+                  </button>
                 )}
               </div>
             )}
 
             <div className="pairing-result">
-               <h3>Telegram Pairing</h3>
-               
-               {isPaired ? (
-                 <div style={{marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(34, 197, 94, 0.1)", borderRadius: "8px", border: "1px solid rgba(34, 197, 94, 0.3)"}}>
-                    <strong style={{color: "rgb(34, 197, 94)"}}>✅ Telegram Paired</strong>
-                    <p style={{marginTop: "0.5rem", fontSize: "0.9rem", color: "var(--text)"}}>Your agent is connected to Telegram.</p>
-                 </div>
-               ) : (
+               {!isPaired && (
                  <>
+                   <h3>Telegram Pairing</h3>
                    <p style={{color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem"}}>
                      Send any message to your bot to receive your code.
                    </p>
@@ -3229,8 +3246,8 @@ case 16:
                    )}
                  </>
                )}
-
-               {(pairingStatus.includes("Success") || isPaired) && (
+               
+               {true && (
                   <div className="advanced-setup-prompt" style={{marginTop: "2rem", padding: "1.5rem", backgroundColor: "rgba(59, 130, 246, 0.1)", borderRadius: "12px", border: "1px solid var(--primary)"}}>
                     <h3 style={{marginTop: 0, marginBottom: "0.5rem"}}>Configuration Complete</h3>
                     <p style={{marginBottom: "1.5rem"}}>Your agent is paired and ready. {mode !== "advanced" && "Would you like to configure advanced settings (Gateway, Skills, Security, Multi-Agent) now?"}</p>
@@ -3239,12 +3256,7 @@ case 16:
                          Open Web Dashboard
                        </button>
                        {mode !== "advanced" && (
-                         <button className="secondary" onClick={() => {
-                           setMode("advanced");
-                           setPairingStatus("");
-                           setSkipBasicConfig(true);
-                           setStep(7);
-                         }}>
+                         <button className="secondary" onClick={() => setShowLicenseModal(true)}>
                            Configure Advanced
                          </button>
                        )}
@@ -3256,7 +3268,7 @@ case 16:
                )}
             </div>
 
-            {(!pairingStatus.includes("Success") && !isPaired) && (
+            {false && (
               <div className="button-group" style={{flexDirection: "column", gap: "10px"}}>
                 <button className="primary" style={{width: "100%"}} onClick={() => open(dashboardUrl)}>
                   Open Web Dashboard {targetEnvironment === "cloud" && "(via Tunnel)"}
@@ -3309,6 +3321,87 @@ case 16:
           {renderStep()}
         </div>
       </main>
+
+      {showLicenseModal && (
+        <div className="modal-overlay" style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "rgba(0,0,0,0.7)", zIndex: 1000,
+          display: "flex", justifyContent: "center", alignItems: "center"
+        }}>
+          <div className="modal-content" style={{
+            backgroundColor: "var(--bg-card)", padding: "2rem", borderRadius: "12px",
+            width: "400px", maxWidth: "90%", border: "1px solid var(--border)"
+          }}>
+            <h3 style={{marginTop: 0}}>Advanced Setup License</h3>
+            <p style={{fontSize: "0.9rem", color: "var(--text-muted)"}}>
+              Advanced features require a license key. You can purchase one from Gumroad.
+            </p>
+            
+            <div className="form-group" style={{marginTop: "1.5rem"}}>
+              <label>License Key</label>
+              <input 
+                value={licenseKey}
+                onChange={(e) => setLicenseKey(e.target.value)}
+                placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX"
+                autoFocus
+              />
+            </div>
+            
+            <div style={{marginTop: "1rem", fontSize: "0.85rem"}}>
+              <a 
+                href="#" 
+                onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawsetup"); }}
+                style={{color: "var(--primary)"}}
+              >
+                Get a license key &rarr;
+              </a>
+            </div>
+
+            {licenseError && (
+              <div className="error" style={{marginTop: "1rem", fontSize: "0.85rem", color: "var(--error)"}}>
+                {licenseError}
+              </div>
+            )}
+
+            <div className="button-group" style={{marginTop: "2rem"}}>
+              <button 
+                className="primary" 
+                disabled={!licenseKey || verifyingLicense}
+                onClick={async () => {
+                  setVerifyingLicense(true);
+                  setLicenseError("");
+                  try {
+                    await invoke("verify_license", { key: licenseKey.trim() });
+                    // Success
+                    setVerifyingLicense(false);
+                    setShowLicenseModal(false);
+                    setMode("advanced");
+                    setPairingStatus("");
+                    setSkipBasicConfig(true); setMaintCompleted(true);
+                    setStep(7);
+                  } catch (e) {
+                    setVerifyingLicense(false);
+                    setLicenseError(String(e));
+                  }
+                }}
+              >
+                {verifyingLicense ? "Verifying..." : "Verify & Continue"}
+              </button>
+              <button 
+                className="secondary" 
+                onClick={() => {
+                  setShowLicenseModal(false);
+                  setLicenseError("");
+                }}
+                disabled={verifyingLicense}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    
     </div>
   );
 }

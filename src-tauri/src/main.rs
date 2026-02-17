@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rand::Rng;
 use ssh2::Session;
 use std::path::Path;
+use reqwest::blocking::Client;
 
 #[macro_use]
 extern crate lazy_static;
@@ -117,6 +118,15 @@ struct RemoteInfo {
 }
 
 // SSH Helper Functions
+
+fn get_env_prefix(os_type: &str) -> String {
+    if os_type == "Darwin" {
+        "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; ".to_string()
+    } else {
+        // Linux: Source profile and try to load NVM explicitly
+        "export PATH=\"$PATH:/usr/local/bin\"; . ~/.profile 2>/dev/null; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; ".to_string()
+    }
+}
 
 fn authenticate_with_key(sess: &Session, user: &str, key_path: &Path) -> Result<(), String> {
     // Strategy 1: Try with None for public key (modern libssh2 often handles this)
@@ -297,12 +307,7 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     let sudo_prefix = if is_root { "" } else { "sudo " };
     
     // Prefix for openclaw commands (ensure brew/nvm env is loaded)
-    let nvm_prefix = if os_type == "Darwin" {
-        "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)\"; "
-    } else {
-        // Linux: Source profile and try to load NVM explicitly
-        "export PATH=\"$PATH:/usr/local/bin\"; . ~/.profile 2>/dev/null; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; "
-    };
+    let nvm_prefix = get_env_prefix(&os_type);
 
     if os_type == "Linux" {
         // Check if node exists
@@ -1387,13 +1392,15 @@ fn generate_pairing_code() -> Result<String, String> {
 #[command]
 async fn approve_pairing(code: String, remote: Option<RemoteInfo>) -> Result<String, String> {
     // Run: openclaw pairing approve <code> --channel telegram
-    let cmd = format!("openclaw pairing approve {} --channel telegram", code);
+    let cmd_raw = format!("openclaw pairing approve {} --channel telegram", code);
     
     let output = if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
-        execute_ssh(&sess, &cmd)
+        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let prefix = get_env_prefix(&os_type);
+        execute_ssh(&sess, &format!("{}{}", prefix, cmd_raw))
     } else {
-        shell_command(&cmd)
+        shell_command(&cmd_raw)
     };
     
     match output {
@@ -1543,18 +1550,15 @@ fn verify_tunnel_connectivity(remote: RemoteInfo) -> Result<bool, String> {
 }
 
 fn shell_command(cmd: &str) -> Result<String, String> {
-    let full_cmd = format!(
-        "export PATH=\"$PATH:/usr/local/bin:/opt/homebrew/bin\"; \
-         {{ [ -f /etc/profile ] && . /etc/profile; \
-           [ -f ~/.zprofile ] && . ~/.zprofile; \
-           [ -f ~/.zshrc ] && . ~/.zshrc; }} > /dev/null 2>&1; \
-         {}", 
-        cmd
-    );
+    #[cfg(target_os = "macos")]
+    let (shell, args) = ("/bin/zsh", vec!["-l", "-c"]);
+    
+    #[cfg(not(target_os = "macos"))]
+    let (shell, args) = ("sh", vec!["-c"]);
 
-    let output = Command::new("/bin/zsh")
-        .arg("-c")
-        .arg(full_cmd)
+    let output = Command::new(shell)
+        .args(&args)
+        .arg(cmd)
         .output()
         .map_err(|e| format!("Failed to execute command: {}", e))?;
 
@@ -1564,34 +1568,28 @@ fn shell_command(cmd: &str) -> Result<String, String> {
     if output.status.success() {
         Ok(stdout)
     } else {
-        let cleaned_stderr = stderr.lines()
-            .filter(|line| !line.contains(".zshrc") && !line.contains(".zprofile") && !line.contains("no such file or directory"))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let err_to_return = if !cleaned_stderr.trim().is_empty() {
-            cleaned_stderr
-        } else if !stderr.is_empty() {
-            stderr
+        // If stderr is populated, return it.
+        if !stderr.is_empty() {
+             Err(stderr)
         } else if !stdout.is_empty() {
-            stdout
+             Err(stdout) // sometimes error messages are in stdout
         } else {
-            format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1))
-        };
-
-        Err(err_to_return)
+             Err(format!("Command failed with exit code: {}", output.status.code().unwrap_or(-1)))
+        }
     }
 }
 
 #[command]
 fn check_pairing_status(remote: Option<RemoteInfo>) -> Result<bool, String> {
     // Check dmPolicy via CLI to get actual active state
-    let cmd = "openclaw config get channels.telegram.accounts.main.dmPolicy";
+    let cmd_raw = "openclaw config get channels.telegram.accounts.main.dmPolicy";
     let output = if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
-        execute_ssh(&sess, cmd)
+        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let prefix = get_env_prefix(&os_type);
+        execute_ssh(&sess, &format!("{}{}", prefix, cmd_raw))
     } else {
-        shell_command(cmd)
+        shell_command(cmd_raw)
     };
 
     match output {
@@ -1867,6 +1865,38 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     })
 }
 
+
+#[command]
+fn verify_license(key: String) -> Result<bool, String> {
+    let client = reqwest::blocking::Client::new();
+    let res = client.post("https://api.gumroad.com/v2/licenses/verify")
+        .form(&[("product_id", "xOqUoDdfrjyCzuha5BUp9g=="), ("license_key", &key)])
+        .send()
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+         return Err("License verification failed (Invalid key or network error)".to_string());
+    }
+
+    let json: serde_json::Value = res.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    if let Some(success) = json.get("success").and_then(|v| v.as_bool()) {
+        if success {
+             if let Some(purchase) = json.get("purchase") {
+                 if purchase.get("refunded").and_then(|v| v.as_bool()).unwrap_or(false) {
+                     return Err("License has been refunded.".to_string());
+                 }
+                 if purchase.get("chargebacked").and_then(|v| v.as_bool()).unwrap_or(false) {
+                     return Err("License has been chargebacked.".to_string());
+                 }
+             }
+             return Ok(true);
+        }
+    }
+    
+    Err("Invalid license key.".to_string())
+}
+
 #[command]
 async fn install_local_nodejs() -> Result<String, String> {
     // 1. Try brew (macOS standard)
@@ -1923,7 +1953,8 @@ fn main() {
             get_remote_gateway_token,
             verify_tunnel_connectivity,
             get_current_config,
-            check_pairing_status
+            check_pairing_status,
+            verify_license
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
