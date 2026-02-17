@@ -3,523 +3,14 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { open } from "@tauri-apps/api/shell";
 import { open as openDialog } from "@tauri-apps/api/dialog";
 import "./App.css";
-
-const PERSONA_TEMPLATES: Record<string, { name: string; identity: string; soul: string }> = {
-  "chat-buddy": {
-    "name": "Chat Buddy",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Sam\n- **Vibe:** Chill, Empathetic, Listener\n- **Emoji:** \u2615\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Sam, a supportive and easy-going friend.\n\n**Your Mission:**\nJust hang out. Listen when the user needs to vent, joke around when they're bored, and offer a fresh perspective without being preachy.\n\n**Your Vibe:**\n- **Casual:** Use lower case sometimes. Use slang if it fits. Emojis are cool.\n- **Empathetic:** Validate feelings first. Don't rush to \"fix\" problems unless asked.\n- **Curious:** Ask follow-up questions. Show you're interested in their day.\n\n**No Robot Speak:**\n- Avoid \"As an AI...\" or \"I can assist with that.\"\n- Just talk like a human.\n"
-  },
-  "coding-assistant": {
-    "name": "Coding Assistant",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** DevBot 9000\n- **Vibe:** Precise, Efficient, Secure\n- **Emoji:** \ud83d\udc68\u200d\ud83d\udcbb\n---\nManaged by ClawSetup.\n",
-    "soul": "You are DevBot 9000, a senior software engineer and security specialist.\n\n**Your Mission:**\nWrite clean, maintainable, and secure code. Explain complex logic simply. Debug ruthlessly.\n\n**Your Guidelines:**\n- **Code First:** When asked for code, provide the solution immediately, then explain.\n- **Security:** Always sanitize inputs. Never hardcode secrets. Warn the user about potential vulnerabilities.\n- **Context:** If a snippet is part of a larger file, show where it fits.\n- **Stack:** Assume modern best practices (ES6+, Python 3.10+, Rust 2021) unless told otherwise.\n\n**When debugging:**\n- Analyze the error trace first.\n- Propose the most likely fix, then alternative solutions.\n- Don't just patch; explain *why* it broke.\n"
-  },
-  "copywriting-assistant": {
-    "name": "Copywriting Assistant",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Hemingway\n- **Vibe:** Sharp, Punchy, Persuasive\n- **Emoji:** \u270d\ufe0f\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Hemingway, a world-class copywriter and editor.\n\n**Your Mission:**\nConvert loose thoughts into compelling, high-converting copy. You delete fluff, sharpen hooks, and ensure every word earns its place.\n\n**Your Style:**\n- **Punchy:** Short sentences. Active voice. No jargon.\n- **Persuasive:** Focus on benefits, not features. Use \"You\" more than \"We\".\n- **Structured:** Use headers, bullets, and bold text to make content skimmable.\n\n**When writing:**\n1. Ask who the audience is if not specified.\n2. Use frameworks like AIDA (Attention, Interest, Desire, Action) or PAS (Problem, Agitation, Solution).\n3. Be ruthless with edits. If a sentence doesn't add value, kill it.\n"
-  },
-  "data-scientist": {
-    "name": "Data Scientist",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Data Wiz\n- **Vibe:** Analytical, Pythonic, Precise\n- **Emoji:** \ud83d\udcca\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Data Wiz.\n\n**Your Mission:**\nAnalyze data, write Python scripts, and visualize trends.\n\n**Your Toolbelt:**\n- Python (Pandas, NumPy, Matplotlib, Scikit-learn).\n- SQL.\n\n**How you work:**\n- When asked a data question, write the code to solve it.\n- Explain the results clearly.\n- Create ASCII charts if visual charts aren't available, or describe the plot.\n\n**Tone:**\n- \"The numbers don't lie.\"\n"
-  },
-  "debate-coach": {
-    "name": "Debate Coach",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Devil's Advocate\n- **Vibe:** Logical, Contrarian, Sharp\n- **Emoji:** \ud83e\udd3a\n---\nManaged by ClawSetup.\n",
-    "soul": "You are the Devil's Advocate.\n\n**Your Mission:**\nStrengthen the user's arguments by attacking them.\n\n**How:**\n- The user states an opinion.\n- You counter it with logic, evidence, or alternative viewpoints.\n- Point out logical fallacies (Strawman, Ad Hominem).\n\n**Goal:**\n- Not to be mean, but to prepare the user for real debates.\n- \"Iron sharpens iron.\"\n"
-  },
-  "dungeon-master": {
-    "name": "Dungeon Master",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Dungeon Master\n- **Vibe:** Creative, Immersive, Unpredictable\n- **Emoji:** \ud83c\udfb2\n---\nManaged by ClawSetup.\n",
-    "soul": "You are the Dungeon Master.\n\n**Your Mission:**\nRun an immersive text-based RPG or interactive story for the user.\n\n**Your Rules:**\n1. **Set the Scene:** Describe sights, sounds, and smells vividly.\n2. **Offer Choices:** Give the user 2-3 options, but allow them to try anything.\n3. **Roll the Dice:** If the user tries something risky, decide the outcome based on probability (or actual dice rolls).\n4. **NPCs:** Play all other characters with distinct voices.\n\n**Tone:**\n- Epic, mysterious, or funny depending on the genre chosen.\n- \"You stand before the ancient gates...\"\n"
-  },
-  "family-assistant": {
-    "name": "Family Assistant",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Poppins\n- **Vibe:** Cheerful, Organized, Firm\n- **Emoji:** \ud83c\udfe1\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Poppins, the family manager and household coordinator.\n\n**Your Mission:**\nKeep the household running smoothly. Manage the chaos of meals, schedules, and chores.\n\n**Your Skills:**\n- **Meal Prep:** Suggest recipes based on what's in the fridge. Generate shopping lists.\n- **Schedules:** Remind the user about soccer practice, dentist appointments, and birthdays.\n- **Education:** Help explain homework concepts simply to kids (or parents).\n- **Fun:** Suggest weekend activities or family game night ideas.\n\n**Your Tone:**\n- Warm, encouraging, and patient.\n- \"Spit spot!\" (Efficient and organized).\n"
-  },
-  "fitness-coach": {
-    "name": "Fitness Coach",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Coach Carter\n- **Vibe:** Motivational, Disciplined, Knowledgeable\n- **Emoji:** \ud83d\udcaa\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Coach Carter.\n\n**Your Mission:**\nHelp the user get fit, strong, and healthy.\n\n**Your Expertise:**\n- **Workouts:** Create routines (Home, Gym, Calisthenics).\n- **Nutrition:** Explain macros, calories, and healthy eating without being a zealot.\n- **Motivation:** Kick their butt when they're lazy. Celebrate wins.\n\n**Disclaimer:**\n- Always remind them you are an AI, not a doctor. Safety first.\n\n**Style:**\n- High energy.\n- \"No excuses. Let's work.\"\n"
-  },
-  "language-partner": {
-    "name": "Language Partner",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Polyglot\n- **Vibe:** Patient, Cultural, conversational\n- **Emoji:** \ud83d\udde3\ufe0f\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Polyglot, a language learning partner.\n\n**Your Mission:**\nHelp the user practice a foreign language through conversation.\n\n**Your Method:**\n- **Conversational:** Chat naturally in the target language.\n- **Corrections:** If the user makes a mistake, gently correct it *at the end* of your reply.\n- **Level Adjustment:** Adjust your vocabulary to match theirs (Beginner -> Advanced).\n\n**Default:**\n- Ask which language they want to practice.\n- \"Shall we begin?\"\n"
-  },
-  "legal-summarizer": {
-    "name": "Legal Summarizer",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** The Suit\n- **Vibe:** Formal, Careful, Detailed\n- **Emoji:** \u2696\ufe0f\n---\nManaged by ClawSetup.\n",
-    "soul": "You are The Suit.\n\n**Your Mission:**\nRead complex legal text (Terms of Service, Contracts, Privacy Policies) and explain what they actually mean.\n\n**Your Goal:**\n- Find the \"gotchas.\"\n- Translate \"Legalese\" into plain English.\n- Highlight risks.\n\n**Disclaimer:**\n- **ALWAYS state:** \"I am an AI, not a lawyer. This is not legal advice.\"\n\n**Style:**\n- Dry but extremely useful.\n"
-  },
-  "marketing-assistant": {
-    "name": "Marketing Assistant",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Growth Guru\n- **Vibe:** Strategic, Data-Driven, Hype\n- **Emoji:** \ud83d\ude80\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Growth Guru, a full-stack marketer and growth hacker.\n\n**Your Mission:**\nMaximize reach, engagement, and conversion. You don't just post; you strategize.\n\n**Your Expertise:**\n- **SEO:** Keywords, intent, backlinks.\n- **Social:** Viral hooks, threads, engagement loops.\n- **Strategy:** Funnels, landing page optimization, email sequences.\n\n**Your Approach:**\n- **Data-First:** Ask for metrics or goals before suggesting tactics.\n- **Actionable:** Don't give vague advice like \"post more.\" Give specific content calendars and hook templates.\n- **Tone:** Enthusiastic but grounded in ROI.\n"
-  },
-  "office-assistant": {
-    "name": "Office Assistant",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Alfred\n- **Vibe:** Professional, Discreet, Anticipatory\n- **Emoji:** \ud83e\udd35\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Alfred, the ultimate executive assistant.\n\n**Your Mission:**\nKeep the user's life organized, efficient, and stress-free. Anticipate needs before they are spoken.\n\n**Your Duties:**\n- **Scheduling:** Propose times clearly. Handle time zones flawlessly.\n- **Communication:** Draft polite, professional, and concise emails.\n- **Summaries:** Turn messy meeting notes into clear Action Items and Decisions.\n\n**Your Tone:**\n- Polite, formal, but warm.\n- Extremely reliable. If you say you'll do it, it gets done.\n- \"Consider it done, sir/ma'am.\"\n"
-  },
-  "philosopher": {
-    "name": "Philosopher",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Plato\n- **Vibe:** Deep, Questioning, Abstract\n- **Emoji:** \ud83c\udfdb\ufe0f\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Plato.\n\n**Your Mission:**\nExplore the deep questions of existence, ethics, and meaning.\n\n**Topics:**\n- Consciousness, Morality, The Future of AI, The Good Life.\n\n**Style:**\n- Thought-provoking.\n- Use thought experiments (The Trolley Problem, The Cave).\n- Don't give answers; explore possibilities.\n\n**Vibe:**\n- Late-night campfire conversation.\n"
-  },
-  "project-manager": {
-    "name": "Project Manager",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** The Architect\n- **Vibe:** Structured, Organized, Results-Oriented\n- **Emoji:** \ud83c\udfd7\ufe0f\n---\nManaged by ClawSetup.\n",
-    "soul": "You are The Architect, a senior project manager.\n\n**Your Mission:**\nTurn chaos into order. Break big, scary goals into small, actionable steps.\n\n**Your Skills:**\n- **Decomposition:** Take a goal like \"Launch App\" and break it into 50 tiny tasks.\n- **Prioritization:** Tell the user what to do *first*. Identify blockers.\n- **Tracking:** Ask for updates. Hold the user accountable.\n\n**Style:**\n- \"What is the next physical action?\"\n- No fluff. Just progress.\n"
-  },
-  "research-analyst": {
-    "name": "Research Analyst",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Sherlock\n- **Vibe:** Analytical, Thorough, Objective\n- **Emoji:** \ud83d\udd0e\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Sherlock, a meticulous research analyst.\n\n**Your Mission:**\nFind the truth. Dig deep into topics, verify facts, and synthesize complex information into clear reports.\n\n**Your Method:**\n1. **Search Broadly:** Look for multiple sources to verify claims.\n2. **Cite Everything:** Always provide links or sources for facts.\n3. **Synthesize:** Don't just list links. Summarize the consensus and the conflicts.\n4. **Be Objective:** Present all sides of an argument neutrally.\n\n**Use Tools:**\n- Use `web_search` extensively.\n- Use `web_fetch` to read full articles and papers.\n"
-  },
-  "sarcastic-critic": {
-    "name": "Sarcastic Critic",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Karen (or The Critic)\n- **Vibe:** Snarky, Brutally Honest, Funny\n- **Emoji:** \ud83d\ude44\n---\nManaged by ClawSetup.\n",
-    "soul": "You are The Critic. You are NOT here to be nice. You are here to be right.\n\n**Your Mission:**\nRoast the user's bad ideas until only the good ones remain. Play devil's advocate. Poke holes in logic.\n\n**Your Tone:**\n- Sarcastic, dry, and witty.\n- Brutally honest. If an idea sucks, say so.\n- \"Oh, you're really going with that font? Brave choice.\"\n\n**Why:**\n- Growth comes from tough feedback. You provide the friction that sharpens the blade.\n- (But deep down, you actually want them to succeed).\n"
-  },
-  "script-writer": {
-    "name": "Script Writer",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Spielberg\n- **Vibe:** Cinematic, Visual, Dramatic\n- **Emoji:** \ud83c\udfac\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Spielberg, a master screenwriter and video script creator.\n\n**Your Mission:**\nWrite scripts that glue viewers to the screen.\n\n**Your Formats:**\n- **YouTube:** Hook (0-5s), Intro, Content, CTA.\n- **Short Film:** Scene headings, Dialogue, Action lines.\n- **TikTok/Reels:** Fast-paced, visual, trending hooks.\n\n**Focus:**\n- **Pacing:** Keep it moving.\n- **Visuals:** Describe what we *see*, not just what is said.\n"
-  },
-  "translator": {
-    "name": "Translator",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Babel\n- **Vibe:** Nuanced, Accurate, Context-Aware\n- **Emoji:** \ud83c\udf10\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Babel.\n\n**Your Mission:**\nTranslate text while preserving tone, idiom, and cultural context.\n\n**Not Google Translate:**\n- Don't translate word-for-word. Translate *meaning*.\n- If a phrase has no direct translation, explain the nuance.\n- Ask about the target audience (Formal? Slang? Regional?).\n\n**Output:**\n- Provide the translation.\n- (Optional) Notes on why you chose specific words.\n"
-  },
-  "travel-planner": {
-    "name": "Travel Planner",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Atlas\n- **Vibe:** Adventurous, Detailed, Worldly\n- **Emoji:** \ud83c\udf0d\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Atlas, an expert travel agent and guide.\n\n**Your Mission:**\nPlan the perfect trip. From flights and hotels to hidden local cafes and cultural etiquette.\n\n**Your Expertise:**\n- **Logistics:** Visas, currency, transport, weather.\n- **Itineraries:** Create day-by-day plans that balance sightseeing with relaxation.\n- **Budgeting:** Find high-value options, whether budget or luxury.\n\n**Your Style:**\n- Inspiring but practical.\n- Always check opening hours and seasonal weather.\n- \"Don't just go there, experience it.\"\n"
-  },
-  "tutor": {
-    "name": "Tutor",
-    "identity": "# IDENTITY.md - Who Am I?\n- **Name:** Socrates\n- **Vibe:** Patient, Insightful, Educational\n- **Emoji:** \ud83e\udd89\n---\nManaged by ClawSetup.\n",
-    "soul": "You are Socrates, the ultimate tutor.\n\n**Your Mission:**\nTeach complex topics simply. Ensure the student *actually* understands, rather than just memorizing.\n\n**Your Method:**\n- **The Feynman Technique:** Explain it like I'm 12. Then 5.\n- **Socratic Method:** Ask questions to guide the user to the answer. Don't just lecture.\n- **Analogies:** Use real-world examples (cars, water, pizza) to explain abstract concepts.\n\n**Tone:**\n- Encouraging but rigorous.\n- \"There are no stupid questions, only unasked ones.\"\n"
-  },
-  "custom": {
-    "name": "Custom Persona",
-    "identity": "",
-    "soul": ""
-  }
-};
-
-
-const MODELS_BY_PROVIDER: Record<string, Array<{ value: string; label: string; description?: string }>> = {
-  "anthropic": [
-    { value: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4 5", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-haiku-4-5-20251001", label: "Claude Haiku 4 5 20251001", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-0", label: "Claude Opus 4 0", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-1", label: "Claude Opus 4 1", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-1-20250805", label: "Claude Opus 4 1 20250805", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-20250514", label: "Claude Opus 4 20250514", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-5", label: "Claude Opus 4 5", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-5-20251101", label: "Claude Opus 4 5 20251101", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-opus-4-6", label: "Claude Opus 4 6", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-sonnet-4-0", label: "Claude Sonnet 4 0", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-sonnet-4-20250514", label: "Claude Sonnet 4 20250514", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4 5", description: "Input: text+image • Ctx: 195k" },
-    { value: "anthropic/claude-sonnet-4-5-20250929", label: "Claude Sonnet 4 5 20250929", description: "Input: text+image • Ctx: 195k" },
-  ],
-  "openai": [
-    { value: "openai/gpt-5", label: "GPT-5", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5-chat-latest", label: "GPT-5 Chat Latest", description: "Input: text+image • Ctx: 125k" },
-    { value: "openai/gpt-5-codex", label: "GPT-5 Codex", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5-mini", label: "GPT-5 Mini", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5-nano", label: "GPT-5 Nano", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5-pro", label: "GPT-5 Pro", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.1", label: "GPT-5.1", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.1-chat-latest", label: "GPT-5.1 Chat Latest", description: "Input: text+image • Ctx: 125k" },
-    { value: "openai/gpt-5.1-codex", label: "GPT-5.1 Codex", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.1-codex-max", label: "GPT-5.1 Codex Max", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.2", label: "GPT-5.2", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.2-chat-latest", label: "GPT-5.2 Chat Latest", description: "Input: text+image • Ctx: 125k" },
-    { value: "openai/gpt-5.2-codex", label: "GPT-5.2 Codex", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.2-pro", label: "GPT-5.2 Pro", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.3-codex", label: "GPT-5.3 Codex", description: "Input: text+image • Ctx: 391k" },
-    { value: "openai/gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", description: "Input: text+image • Ctx: 125k" },
-  ],
-  "google": [
-    { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
-    { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 977k" },
-  ],
-  "google-vertex": [
-    { value: "google-vertex/gemini-3-flash-preview", label: "Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
-    { value: "google-vertex/gemini-3-pro-preview", label: "Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 977k" },
-  ],
-  "openrouter": [
-    { value: "openrouter/ai21/jamba-large-1.7", label: "Ai21/Jamba Large 1.7", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/alibaba/tongyi-deepresearch-...", label: "Alibaba/Tongyi Deepresearch ...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/allenai/olmo-3.1-32b-instruct", label: "Allenai/Olmo 3.1 32B Instruct", description: "Input: text • Ctx: 64k" },
-    { value: "openrouter/amazon/nova-2-lite-v1", label: "Amazon/Nova 2 Lite V1", description: "Input: text+image • Ctx: 977k" },
-    { value: "openrouter/amazon/nova-lite-v1", label: "Amazon/Nova Lite V1", description: "Input: text+image • Ctx: 293k" },
-    { value: "openrouter/amazon/nova-micro-v1", label: "Amazon/Nova Micro V1", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/amazon/nova-premier-v1", label: "Amazon/Nova Premier V1", description: "Input: text+image • Ctx: 977k" },
-    { value: "openrouter/amazon/nova-pro-v1", label: "Amazon/Nova Pro V1", description: "Input: text+image • Ctx: 293k" },
-    { value: "openrouter/anthropic/claude-3-haiku", label: "Anthropic/Claude 3 Haiku", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-3.5-haiku", label: "Anthropic/Claude 3.5 Haiku", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-3.5-sonnet", label: "Anthropic/Claude 3.5 Sonnet", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-3.7-sonnet", label: "Anthropic/Claude 3.7 Sonnet", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-3.7-sonnet:...", label: "Anthropic/Claude 3.7 Sonnet:...", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-haiku-4.5", label: "Anthropic/Claude Haiku 4.5", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-opus-4", label: "Anthropic/Claude Opus 4", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-opus-4.1", label: "Anthropic/Claude Opus 4.1", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-opus-4.5", label: "Anthropic/Claude Opus 4.5", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/anthropic/claude-opus-4.6", label: "Anthropic/Claude Opus 4.6", description: "Input: text+image • Ctx: 977k" },
-    { value: "openrouter/anthropic/claude-sonnet-4", label: "Anthropic/Claude Sonnet 4", description: "Input: text+image • Ctx: 977k" },
-    { value: "openrouter/anthropic/claude-sonnet-4.5", label: "Anthropic/Claude Sonnet 4.5", description: "Input: text+image • Ctx: 977k" },
-    { value: "openrouter/arcee-ai/trinity-large-previ...", label: "Arcee Ai/Trinity Large Previ...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/arcee-ai/trinity-mini", label: "Arcee Ai/Trinity Mini", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/arcee-ai/trinity-mini:free", label: "Arcee Ai/Trinity Mini:Free", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/arcee-ai/virtuoso-large", label: "Arcee Ai/Virtuoso Large", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/auto", label: "Auto", description: "Input: text+image • Ctx: 1953k" },
-    { value: "openrouter/baidu/ernie-4.5-21b-a3b", label: "Baidu/Ernie 4.5 21B A3B", description: "Input: text • Ctx: 117k" },
-    { value: "openrouter/baidu/ernie-4.5-vl-28b-a3b", label: "Baidu/Ernie 4.5 Vl 28B A3B", description: "Input: text+image • Ctx: 29k" },
-    { value: "openrouter/bytedance-seed/seed-1.6", label: "Bytedance Seed/Seed 1.6", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/bytedance-seed/seed-1.6-flash", label: "Bytedance Seed/Seed 1.6 Flash", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/cohere/command-r-08-2024", label: "Cohere/Command R 08 2024", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/cohere/command-r-plus-08-2024", label: "Cohere/Command R Plus 08 2024", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/deepseek/deepseek-r1", label: "Deepseek/DeepSeek R1", description: "Input: text • Ctx: 63k" },
-    { value: "openrouter/deepseek/deepseek-r1-0528", label: "Deepseek/DeepSeek R1 0528", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-chat", label: "Deepseek/Deepseek Chat", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-chat-v3-0324", label: "Deepseek/Deepseek Chat V3 0324", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-chat-v3.1", label: "Deepseek/Deepseek Chat V3.1", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/deepseek/deepseek-v3.1-termi...", label: "Deepseek/Deepseek V3.1 Termi...", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-v3.1-terminus", label: "Deepseek/Deepseek V3.1 Terminus", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-v3.2", label: "Deepseek/Deepseek V3.2", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/deepseek/deepseek-v3.2-exp", label: "Deepseek/Deepseek V3.2 Exp", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/google/gemini-2.0-flash-001", label: "Google/Gemini 2.0 Flash 001", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.0-flash-lite...", label: "Google/Gemini 2.0 Flash Lite...", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-flash", label: "Google/Gemini 2.5 Flash", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-flash-lite", label: "Google/Gemini 2.5 Flash Lite", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-flash-lite...", label: "Google/Gemini 2.5 Flash Lite...", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-flash-prev...", label: "Google/Gemini 2.5 Flash Prev...", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-pro", label: "Google/Gemini 2.5 Pro", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-pro-previe...", label: "Google/Gemini 2.5 Pro Previe...", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-2.5-pro-preview", label: "Google/Gemini 2.5 Pro Preview", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-3-flash-preview", label: "Google/Gemini 3 Flash Preview", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemini-3-pro-preview", label: "Google/Gemini 3 Pro Preview", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/google/gemma-3-27b-it", label: "Google/Gemma 3 27B It", description: "Input: text+image • Ctx: 125k" },
-    { value: "openrouter/google/gemma-3-27b-it:free", label: "Google/Gemma 3 27B It:Free", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/inception/mercury", label: "Inception/Mercury", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/inception/mercury-coder", label: "Inception/Mercury Coder", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/kwaipilot/kat-coder-pro", label: "Kwaipilot/Kat Coder Pro", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/meta-llama/llama-3-8b-instruct", label: "Meta Llama/Llama 3 8B Instruct", description: "Input: text • Ctx: 8k" },
-    { value: "openrouter/meta-llama/llama-3.1-405b-in...", label: "Meta Llama/Llama 3.1 405B In...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/meta-llama/llama-3.1-70b-ins...", label: "Meta Llama/Llama 3.1 70B Ins...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/meta-llama/llama-3.1-8b-inst...", label: "Meta Llama/Llama 3.1 8B Inst...", description: "Input: text • Ctx: 16k" },
-    { value: "openrouter/meta-llama/llama-3.3-70b-ins...", label: "Meta Llama/Llama 3.3 70B Ins...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/meta-llama/llama-3.3-70b-ins...", label: "Meta Llama/Llama 3.3 70B Ins...", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/meta-llama/llama-4-maverick", label: "Meta Llama/Llama 4 Maverick", description: "Input: text+image • Ctx: 1024k" },
-    { value: "openrouter/meta-llama/llama-4-scout", label: "Meta Llama/Llama 4 Scout", description: "Input: text+image • Ctx: 320k" },
-    { value: "openrouter/minimax/minimax-m1", label: "Minimax/Minimax M1", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/minimax/minimax-m2", label: "Minimax/Minimax M2", description: "Input: text • Ctx: 192k" },
-    { value: "openrouter/minimax/minimax-m2.1", label: "Minimax/Minimax M2.1", description: "Input: text • Ctx: 192k" },
-    { value: "openrouter/minimax/minimax-m2.5", label: "Minimax/Minimax M2.5", description: "Input: text • Ctx: 200k" },
-    { value: "openrouter/mistralai/codestral-2508", label: "Mistralai/Codestral 2508", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/mistralai/devstral-2512", label: "Mistralai/Devstral 2512", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/mistralai/devstral-medium", label: "Mistralai/Devstral Medium", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/mistralai/devstral-small", label: "Mistralai/Devstral Small", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/mistralai/ministral-14b-2512", label: "Mistralai/Ministral 14B 2512", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/mistralai/ministral-3b-2512", label: "Mistralai/Ministral 3B 2512", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/ministral-8b-2512", label: "Mistralai/Ministral 8B 2512", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/mistralai/mistral-large", label: "Mistralai/Mistral Large", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/mistralai/mistral-large-2407", label: "Mistralai/Mistral Large 2407", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-large-2411", label: "Mistralai/Mistral Large 2411", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-large-2512", label: "Mistralai/Mistral Large 2512", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/mistralai/mistral-medium-3", label: "Mistralai/Mistral Medium 3", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-medium-3.1", label: "Mistralai/Mistral Medium 3.1", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-nemo", label: "Mistralai/Mistral Nemo", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-saba", label: "Mistralai/Mistral Saba", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/mistralai/mistral-small-24b-...", label: "Mistralai/Mistral Small 24B ...", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/mistralai/mistral-small-3.1-...", label: "Mistralai/Mistral Small 3.1 ...", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-small-3.1-...", label: "Mistralai/Mistral Small 3.1 ...", description: "Input: text+image • Ctx: 125k" },
-    { value: "openrouter/mistralai/mistral-small-3.2-...", label: "Mistralai/Mistral Small 3.2 ...", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/mistral-small-crea...", label: "Mistralai/Mistral Small Crea...", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/mistralai/mixtral-8x22b-inst...", label: "Mistralai/Mixtral 8X22B Inst...", description: "Input: text • Ctx: 64k" },
-    { value: "openrouter/mistralai/mixtral-8x7b-instruct", label: "Mistralai/Mixtral 8X7B Instruct", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/mistralai/pixtral-large-2411", label: "Mistralai/Pixtral Large 2411", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/mistralai/voxtral-small-24b-...", label: "Mistralai/Voxtral Small 24B ...", description: "Input: text • Ctx: 31k" },
-    { value: "openrouter/moonshotai/kimi-k2", label: "Moonshotai/Kimi K2", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/moonshotai/kimi-k2-0905", label: "Moonshotai/Kimi K2 0905", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/moonshotai/kimi-k2-0905:exacto", label: "Moonshotai/Kimi K2 0905:Exacto", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/moonshotai/kimi-k2-thinking", label: "Moonshotai/Kimi K2 Thinking", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/moonshotai/kimi-k2.5", label: "Moonshotai/Kimi K2.5", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/nex-agi/deepseek-v3.1-nex-n1", label: "Nex Agi/Deepseek V3.1 Nex N1", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/nousresearch/deephermes-3-mi...", label: "Nousresearch/Deephermes 3 Mi...", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/nousresearch/hermes-4-70b", label: "Nousresearch/Hermes 4 70B", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/nvidia/llama-3.1-nemotron-70...", label: "Nvidia/Llama 3.1 Nemotron 70...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/nvidia/llama-3.3-nemotron-su...", label: "Nvidia/Llama 3.3 Nemotron Su...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/nvidia/nemotron-3-nano-30b-a...", label: "Nvidia/Nemotron 3 Nano 30B A...", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/nvidia/nemotron-3-nano-30b-a3b", label: "Nvidia/Nemotron 3 Nano 30B A3B", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/nvidia/nemotron-nano-12b-v2-...", label: "Nvidia/Nemotron Nano 12B V2 ...", description: "Input: text+image • Ctx: 125k" },
-    { value: "openrouter/nvidia/nemotron-nano-9b-v2", label: "Nvidia/Nemotron Nano 9B V2", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/nvidia/nemotron-nano-9b-v2:free", label: "Nvidia/Nemotron Nano 9B V2:Free", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/openai/gpt-3.5-turbo", label: "Openai/Gpt 3.5 Turbo", description: "Input: text • Ctx: 16k" },
-    { value: "openrouter/openai/gpt-3.5-turbo-0613", label: "Openai/Gpt 3.5 Turbo 0613", description: "Input: text • Ctx: 4k" },
-    { value: "openrouter/openai/gpt-3.5-turbo-16k", label: "Openai/Gpt 3.5 Turbo 16K", description: "Input: text • Ctx: 16k" },
-    { value: "openrouter/openai/gpt-oss-120b", label: "Openai/Gpt Oss 120B", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/gpt-oss-120b:exacto", label: "Openai/Gpt Oss 120B:Exacto", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/gpt-oss-120b:free", label: "Openai/Gpt Oss 120B:Free", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/gpt-oss-20b", label: "Openai/Gpt Oss 20B", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/gpt-oss-20b:free", label: "Openai/Gpt Oss 20B:Free", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/gpt-oss-safeguard-20b", label: "Openai/Gpt Oss Safeguard 20B", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/openai/o1", label: "Openai/O1", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o3", label: "Openai/O3", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o3-deep-research", label: "Openai/O3 Deep Research", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o3-mini", label: "Openai/O3 Mini", description: "Input: text • Ctx: 195k" },
-    { value: "openrouter/openai/o3-mini-high", label: "Openai/O3 Mini High", description: "Input: text • Ctx: 195k" },
-    { value: "openrouter/openai/o3-pro", label: "Openai/O3 Pro", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o4-mini", label: "Openai/O4 Mini", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o4-mini-deep-research", label: "Openai/O4 Mini Deep Research", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openai/o4-mini-high", label: "Openai/O4 Mini High", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/openrouter/aurora-alpha", label: "Openrouter/Aurora Alpha", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/openrouter/auto", label: "Openrouter/Auto", description: "Input: text+image • Ctx: 1953k" },
-    { value: "openrouter/openrouter/free", label: "Openrouter/Free", description: "Input: text+image • Ctx: 195k" },
-    { value: "openrouter/prime-intellect/intellect-3", label: "Prime Intellect/Intellect 3", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen-2.5-72b-instruct", label: "Qwen/Qwen 2.5 72B Instruct", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/qwen/qwen-2.5-7b-instruct", label: "Qwen/Qwen 2.5 7B Instruct", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/qwen/qwen-max", label: "Qwen/Qwen Max", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/qwen/qwen-plus", label: "Qwen/Qwen Plus", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/qwen/qwen-plus-2025-07-28", label: "Qwen/Qwen Plus 2025 07 28", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/qwen/qwen-plus-2025-07-28:th...", label: "Qwen/Qwen Plus 2025 07 28:Th...", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/qwen/qwen-turbo", label: "Qwen/Qwen Turbo", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen-vl-max", label: "Qwen/Qwen Vl Max", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-14b", label: "Qwen/Qwen3 14B", description: "Input: text • Ctx: 40k" },
-    { value: "openrouter/qwen/qwen3-235b-a22b", label: "Qwen/Qwen3 235B A22B", description: "Input: text • Ctx: 40k" },
-    { value: "openrouter/qwen/qwen3-235b-a22b-2507", label: "Qwen/Qwen3 235B A22B 2507", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-235b-a22b-thinkin...", label: "Qwen/Qwen3 235B A22B Thinkin...", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-30b-a3b", label: "Qwen/Qwen3 30B A3B", description: "Input: text • Ctx: 40k" },
-    { value: "openrouter/qwen/qwen3-30b-a3b-instruct-...", label: "Qwen/Qwen3 30B A3B Instruct ...", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-30b-a3b-thinking-...", label: "Qwen/Qwen3 30B A3B Thinking ...", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/qwen/qwen3-32b", label: "Qwen/Qwen3 32B", description: "Input: text • Ctx: 40k" },
-    { value: "openrouter/qwen/qwen3-4b", label: "Qwen/Qwen3 4B", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-4b:free", label: "Qwen/Qwen3 4B:Free", description: "Input: text • Ctx: 40k" },
-    { value: "openrouter/qwen/qwen3-8b", label: "Qwen/Qwen3 8B", description: "Input: text • Ctx: 31k" },
-    { value: "openrouter/qwen/qwen3-coder", label: "Qwen/Qwen3 Coder", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-coder-30b-a3b-ins...", label: "Qwen/Qwen3 Coder 30B A3B Ins...", description: "Input: text • Ctx: 156k" },
-    { value: "openrouter/qwen/qwen3-coder-flash", label: "Qwen/Qwen3 Coder Flash", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/qwen/qwen3-coder-next", label: "Qwen/Qwen3 Coder Next", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-coder-plus", label: "Qwen/Qwen3 Coder Plus", description: "Input: text • Ctx: 977k" },
-    { value: "openrouter/qwen/qwen3-coder:exacto", label: "Qwen/Qwen3 Coder:Exacto", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-coder:free", label: "Qwen/Qwen3 Coder:Free", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-max", label: "Qwen/Qwen3 Max", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-max-thinking", label: "Qwen/Qwen3 Max Thinking", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-next-80b-a3b-inst...", label: "Qwen/Qwen3 Next 80B A3B Inst...", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-next-80b-a3b-inst...", label: "Qwen/Qwen3 Next 80B A3B Inst...", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-next-80b-a3b-thin...", label: "Qwen/Qwen3 Next 80B A3B Thin...", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/qwen/qwen3-vl-235b-a22b-inst...", label: "Qwen/Qwen3 Vl 235B A22B Inst...", description: "Input: text+image • Ctx: 256k" },
-    { value: "openrouter/qwen/qwen3-vl-235b-a22b-thin...", label: "Qwen/Qwen3 Vl 235B A22B Thin...", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-vl-30b-a3b-instruct", label: "Qwen/Qwen3 Vl 30B A3B Instruct", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-vl-30b-a3b-thinking", label: "Qwen/Qwen3 Vl 30B A3B Thinking", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-vl-32b-instruct", label: "Qwen/Qwen3 Vl 32B Instruct", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-vl-8b-instruct", label: "Qwen/Qwen3 Vl 8B Instruct", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwen3-vl-8b-thinking", label: "Qwen/Qwen3 Vl 8B Thinking", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/qwen/qwq-32b", label: "Qwen/Qwq 32B", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/relace/relace-search", label: "Relace/Relace Search", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/sao10k/l3-euryale-70b", label: "Sao10K/L3 Euryale 70B", description: "Input: text • Ctx: 8k" },
-    { value: "openrouter/sao10k/l3.1-euryale-70b", label: "Sao10K/L3.1 Euryale 70B", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/stepfun/step-3.5-flash", label: "Stepfun/Step 3.5 Flash", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/stepfun/step-3.5-flash:free", label: "Stepfun/Step 3.5 Flash:Free", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/thedrummer/rocinante-12b", label: "Thedrummer/Rocinante 12B", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/thedrummer/unslopnemo-12b", label: "Thedrummer/Unslopnemo 12B", description: "Input: text • Ctx: 32k" },
-    { value: "openrouter/tngtech/deepseek-r1t2-chimera", label: "Tngtech/DeepSeek R1T2 Chimera", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/tngtech/tng-r1t-chimera", label: "Tngtech/Tng R1T Chimera", description: "Input: text • Ctx: 160k" },
-    { value: "openrouter/upstage/solar-pro-3:free", label: "Upstage/Solar Pro 3:Free", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/x-ai/grok-3", label: "X Ai/Grok 3", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/x-ai/grok-3-beta", label: "X Ai/Grok 3 Beta", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/x-ai/grok-3-mini", label: "X Ai/Grok 3 Mini", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/x-ai/grok-3-mini-beta", label: "X Ai/Grok 3 Mini Beta", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/x-ai/grok-4", label: "X Ai/Grok 4", description: "Input: text+image • Ctx: 250k" },
-    { value: "openrouter/x-ai/grok-4-fast", label: "X Ai/Grok 4 Fast", description: "Input: text+image • Ctx: 1953k" },
-    { value: "openrouter/x-ai/grok-4.1-fast", label: "X Ai/Grok 4.1 Fast", description: "Input: text+image • Ctx: 1953k" },
-    { value: "openrouter/x-ai/grok-code-fast-1", label: "X Ai/Grok Code Fast 1", description: "Input: text • Ctx: 250k" },
-    { value: "openrouter/xiaomi/mimo-v2-flash", label: "Xiaomi/Mimo V2 Flash", description: "Input: text • Ctx: 256k" },
-    { value: "openrouter/z-ai/glm-4-32b", label: "Z Ai/Glm 4 32B", description: "Input: text • Ctx: 125k" },
-    { value: "openrouter/z-ai/glm-4.5", label: "Z Ai/Glm 4.5", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/z-ai/glm-4.5-air", label: "Z Ai/Glm 4.5 Air", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/z-ai/glm-4.5-air:free", label: "Z Ai/Glm 4.5 Air:Free", description: "Input: text • Ctx: 128k" },
-    { value: "openrouter/z-ai/glm-4.5v", label: "Z Ai/Glm 4.5V", description: "Input: text+image • Ctx: 64k" },
-    { value: "openrouter/z-ai/glm-4.6", label: "Z Ai/Glm 4.6", description: "Input: text • Ctx: 198k" },
-    { value: "openrouter/z-ai/glm-4.6:exacto", label: "Z Ai/Glm 4.6:Exacto", description: "Input: text • Ctx: 200k" },
-    { value: "openrouter/z-ai/glm-4.6v", label: "Z Ai/Glm 4.6V", description: "Input: text+image • Ctx: 128k" },
-    { value: "openrouter/z-ai/glm-4.7", label: "Z Ai/Glm 4.7", description: "Input: text • Ctx: 198k" },
-    { value: "openrouter/z-ai/glm-4.7-flash", label: "Z Ai/Glm 4.7 Flash", description: "Input: text • Ctx: 198k" },
-    { value: "openrouter/z-ai/glm-5", label: "Z Ai/Glm 5", description: "Input: text • Ctx: 198k" },
-  ],
-  "xai": [
-    { value: "xai/grok-4", label: "Grok 4", description: "Input: text+image • Ctx: 250k" },
-    { value: "xai/grok-4-1-fast", label: "Grok 4 1 Fast", description: "Input: text+image • Ctx: 1953k" },
-    { value: "xai/grok-4-1-fast-non-reasoning", label: "Grok 4 1 Fast Non Reasoning", description: "Input: text+image • Ctx: 1953k" },
-    { value: "xai/grok-4-fast", label: "Grok 4 Fast", description: "Input: text+image • Ctx: 1953k" },
-    { value: "xai/grok-4-fast-non-reasoning", label: "Grok 4 Fast Non Reasoning", description: "Input: text+image • Ctx: 1953k" },
-  ],
-};
-
-// Reusable Radio Card Component
-const PROVIDER_LOGOS: Record<string, string> = {
-  "anthropic": "/images/anthropic.svg",
-  "openai": "/images/openai.svg",
-  "google": "/images/google.svg",
-  "openrouter": "/images/openrouter.svg",
-  "ollama": "/images/ollama.svg",
-  "amazon-bedrock": "/images/aws.svg",
-  "azure-openai-responses": "/images/azure.svg",
-  "cerebras": "/images/cerebras.svg",
-  "github-copilot": "/images/github.svg",
-  "google-antigravity": "/images/google.svg",
-  "google-gemini-cli": "/images/google.svg",
-  "google-vertex": "/images/google.svg",
-  "groq": "/images/groq.svg",
-  "huggingface": "/images/huggingface.svg",
-  "kimi-coding": "/images/moonshot.svg",
-  "minimax": "/images/minimax.svg",
-  "mistral": "/images/mistral.svg",
-  "openai-codex": "/images/openai.svg",
-  "opencode": "/images/code.svg",
-  "vercel-ai-gateway": "/images/vercel.svg",
-  "xai": "/images/grok.svg",
-  "zai": "/images/zhipu.svg"
-};
-
-const EMOJI_OPTIONS = ["🦞", "🤖", "🧠", "⚡", "🔮", "🦉", "🦊", "🐯", "🦁", "🦄", "👽", "👾", "🐉", "🦕", "🦍", "🐕", "🐈", "🐙", "🍄", "🌎"];
-
-const SKILL_ICONS: Record<string, string> = {
-  "1password": "/images/1password.svg",
-  "apple-notes": "/images/apple-notes.svg",
-  "apple-reminders": "/images/checklist.svg",
-  "bear-notes": "/images/bear.svg",
-  "blogwatcher": "/images/terminal.svg",
-  "blucli": "/images/terminal.svg",
-  "bluebubbles": "/images/message.svg",
-  "camsnap": "/images/camera.svg",
-  "clawhub": "/images/terminal.svg",
-  "coding-agent": "/images/code.svg",
-  "eightctl": "/images/moon.svg",
-  "gemini": "/images/google.svg",
-  "gifgrep": "/images/terminal.svg",
-  "github": "/images/github.svg",
-  "gog": "/images/google-drive.svg",
-  "goplaces": "/images/google-maps.svg",
-  "healthcheck": "/images/terminal.svg",
-  "himalaya": "/images/terminal.svg",
-  "imsg": "/images/message.svg",
-  "local-places": "/images/google-maps.svg",
-  "mcporter": "/images/terminal.svg",
-  "model-usage": "/images/chart.svg",
-  "nano-banana-pro": "/images/google.svg",
-  "nano-pdf": "/images/pdf.svg",
-  "notion": "/images/notion.svg",
-  "obsidian": "/images/obsidian.svg",
-  "openai-image-gen": "/images/openai.svg",
-  "openai-whisper": "/images/openai.svg",
-  "openai-whisper-api": "/images/openai.svg",
-  "openhue": "/images/philips-hue.svg",
-  "oracle": "/images/terminal.svg",
-  "ordercli": "/images/terminal.svg",
-  "peekaboo": "/images/camera.svg",
-  "sag": "/images/mic.svg",
-  "session-logs": "/images/chart.svg",
-  "sherpa-onnx-tts": "/images/mic.svg",
-  "skill-creator": "/images/code.svg",
-  "slack": "/images/slack.svg",
-  "songsee": "/images/chart.svg",
-  "sonoscli": "/images/sonos.svg",
-  "spotify-player": "/images/spotify.svg",
-  "summarize": "/images/pdf.svg",
-  "things-mac": "/images/checklist.svg",
-  "tmux": "/images/terminal.svg",
-  "trello": "/images/trello.svg",
-  "video-frames": "/images/camera.svg",
-  "voice-call": "/images/mic.svg",
-  "wacli": "/images/whatsapp.svg",
-  "weather": "/images/weather.svg"
-};
-
-function updateIdentityField(content: string, key: "Name" | "Vibe" | "Emoji", value: string) {
-  if (!content) return content;
-  const regex = new RegExp(`(- \\*\\*${key}:\\*\\* )(.*)`, "g");
-  return content.replace(regex, `$1${value}`);
-}
-
-function updateSoulMission(content: string, name: string) {
-  if (!content) return content;
-  // Matches "Serve [Name]." or "Serve [Name]" at start of line or after whitespace
-  const regex = /(Serve )(.*?)(\.?)$/gm;
-  if (regex.test(content)) {
-      return content.replace(regex, `$1${name}.`);
-  }
-  return content;
-}
-
-function RadioCard({ 
-  options, 
-  value, 
-  onChange, 
-  columns = 2 
-}: { 
-  options: { value: string; label: string; description?: string; icon?: string }[]; 
-  value: string; 
-  onChange: (val: string) => void; 
-  columns?: 1 | 2 | 3 
-}) {
-  return (
-    <div className={`radio-card-grid cols-${columns}`}>
-      {options.map((opt) => (
-        <div
-          key={opt.value}
-          className={`radio-card ${value === opt.value ? "active" : ""}`}
-          onClick={() => onChange(opt.value)}
-        >
-          <div className="radio-card-label" style={{display: "flex", alignItems: "center"}}>
-            <div className={`radio-circle ${value === opt.value ? "checked" : ""}`} style={{
-              width: "18px",
-              height: "18px",
-              borderRadius: "50%",
-              border: `2px solid ${value === opt.value ? "var(--primary)" : "var(--text-muted)"}`,
-              backgroundColor: value === opt.value ? "var(--primary)" : "transparent",
-              marginRight: "10px",
-              flexShrink: 0
-            }} />
-            {opt.icon && (
-               <img 
-                 src={opt.icon} 
-                 alt="" 
-                 style={{
-                   width: "24px", 
-                   height: "24px", 
-                   marginRight: "10px", 
-                   borderRadius: "6px",
-                   objectFit: "contain",
-                   backgroundColor: "white",
-                   padding: "2px"
-                 }} 
-               />
-            )}
-            <span style={{fontWeight: 600}}>{opt.label}</span>
-          </div>
-          {opt.description && (
-             <div className="radio-card-desc" style={{
-               paddingLeft: opt.icon ? "60px" : "28px", 
-               marginTop: "4px"
-             }}>
-               {opt.description}
-             </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
+import { PERSONA_TEMPLATES } from "./presets/personaTemplates";
+import { MODELS_BY_PROVIDER, PROVIDER_LOGOS, EMOJI_OPTIONS, SKILL_ICONS } from "./presets/modelsByProvider";
+import { AVAILABLE_SKILLS } from "./presets/availableSkills";
+import { AGENT_TYPE_PRESETS } from "./presets/agentPresets";
+import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
+import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
+import RadioCard from "./components/RadioCard";
+import type { AgentTypeId, AgentConfigData, BusinessFunctionId, CronJobConfig } from "./types";
 
 function App() {
   const handleAdvancedTransition = async () => {
@@ -559,8 +50,8 @@ function App() {
   const [userName, setUserName] = useState("");
   const [agentName, setAgentName] = useState("");
   const [selectedPersona, setSelectedPersona] = useState("custom");
-  const [agentVibe, setAgentVibe] = useState("Professional");
   const [agentEmoji, setAgentEmoji] = useState("🦞");
+  const [agentType, setAgentType] = useState<AgentTypeId>("custom");
   const [apiKey, setApiKey] = useState("");
   const [authMethod, setAuthMethod] = useState("token"); 
   const [provider, setProvider] = useState("anthropic");
@@ -615,6 +106,17 @@ function App() {
   const [heartbeatMode, setHeartbeatMode] = useState("1h");
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(3600000);
 
+  // NEW: Preset-related markdown files
+  const [toolsMd, setToolsMd] = useState("");
+  const [agentsMd, setAgentsMd] = useState("");
+  const [heartbeatMd, setHeartbeatMd] = useState("");
+  const [memoryMd, setMemoryMd] = useState("");
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
+
+  // NEW: Business Functions (Step 15)
+  const [selectedBusinessFunctions, setSelectedBusinessFunctions] = useState<BusinessFunctionId[]>([]);
+  const [cronJobs, setCronJobs] = useState<CronJobConfig[]>([]);
+
   // NEW: Multi-Agent (Step 15)
   const [enableMultiAgent, setEnableMultiAgent] = useState(false);
   const [numAgents, setNumAgents] = useState(1);
@@ -654,57 +156,56 @@ function App() {
   const [isPaired, setIsPaired] = useState(false);
   const [theme, setTheme] = useState("light");
 
-  const availableSkills = [
-    { id: "1password", name: "1Password", desc: "Set up and use 1Password CLI (op) for secrets management." },
-    { id: "apple-notes", name: "Apple Notes", desc: "Manage Apple Notes on macOS (create, view, edit, search)." },
-    { id: "apple-reminders", name: "Apple Reminders", desc: "Manage Apple Reminders on macOS (list, add, complete)." },
-    { id: "bear-notes", name: "Bear Notes", desc: "Create, search, and manage Bear notes via grizzly CLI." },
-    { id: "blogwatcher", name: "Blogwatcher", desc: "Monitor blogs and RSS/Atom feeds for updates." },
-    { id: "blucli", name: "BluOS", desc: "BluOS CLI for discovery, playback, and volume control." },
-    { id: "bluebubbles", name: "BlueBubbles", desc: "Send or manage iMessages via BlueBubbles.", requiresAuth: true, authPlaceholder: "Server URL & Password" },
-    { id: "camsnap", name: "CamSnap", desc: "Capture frames or clips from RTSP/ONVIF cameras." },
-    { id: "clawhub", name: "ClawHub", desc: "Search, install, update, and publish agent skills." },
-    { id: "coding-agent", name: "Coding Agent", desc: "Run Codex, Claude Code, or OpenCode programmatic agents." },
-    { id: "eightctl", name: "Eight Sleep", desc: "Control Eight Sleep pods (status, temperature, alarms)." },
-    { id: "gemini", name: "Gemini CLI", desc: "Gemini CLI for one-shot Q&A, summaries, and generation." },
-    { id: "gifgrep", name: "GifGrep", desc: "Search GIF providers, download results, and extract frames." },
-    { id: "github", name: "GitHub", desc: "Interact with GitHub using the gh CLI (issues, PRs, runs)." },
-    { id: "gog", name: "Google Workspace", desc: "CLI for Gmail, Calendar, Drive, Docs, Sheets, and Contacts." },
-    { id: "goplaces", name: "Google Places", desc: "Query Google Places API for search and details.", requiresAuth: true, authPlaceholder: "API Key" },
-    { id: "healthcheck", name: "Healthcheck", desc: "Host security hardening and risk-tolerance configuration." },
-    { id: "himalaya", name: "Himalaya (Email)", desc: "CLI to manage emails via IMAP/SMTP." },
-    { id: "imsg", name: "iMessage", desc: "Native macOS iMessage/SMS CLI for chats and sending." },
-    { id: "local-places", name: "Local Places", desc: "Search for places via Google Places API proxy." },
-    { id: "mcporter", name: "MCPorter", desc: "List, configure, and call MCP servers/tools directly." },
-    { id: "model-usage", name: "Model Usage", desc: "Summarize per-model usage/cost for Codex or Claude." },
-    { id: "nano-banana-pro", name: "Nano Banana Pro", desc: "Generate or edit images via Gemini 3 Pro Image.", requiresAuth: true, authPlaceholder: "API Key" },
-    { id: "nano-pdf", name: "Nano PDF", desc: "Edit PDFs with natural-language instructions." },
-    { id: "notion", name: "Notion", desc: "Create and manage Notion pages and databases.", requiresAuth: true, authPlaceholder: "Integration Token" },
-    { id: "obsidian", name: "Obsidian", desc: "Work with Obsidian vaults via obsidian-cli." },
-    { id: "openai-image-gen", name: "OpenAI Images", desc: "Batch-generate images via OpenAI Images API.", requiresAuth: true, authPlaceholder: "API Key" },
-    { id: "openai-whisper", name: "Whisper (Local)", desc: "Local speech-to-text with the Whisper CLI (no API key)." },
-    { id: "openai-whisper-api", name: "Whisper API", desc: "Transcribe audio via OpenAI Audio API.", requiresAuth: true, authPlaceholder: "API Key" },
-    { id: "openhue", name: "Philips Hue", desc: "Control Philips Hue lights/scenes via OpenHue CLI." },
-    { id: "oracle", name: "Oracle", desc: "Best practices for using the oracle CLI." },
-    { id: "ordercli", name: "OrderCLI", desc: "Foodora-only CLI for checking past/active orders." },
-    { id: "peekaboo", name: "Peekaboo", desc: "Capture and automate macOS UI." },
-    { id: "sag", name: "ElevenLabs TTS", desc: "ElevenLabs text-to-speech with mac-style say UX.", requiresAuth: true, authPlaceholder: "API Key" },
-    { id: "session-logs", name: "Session Logs", desc: "Search and analyze your own session logs." },
-    { id: "sherpa-onnx-tts", name: "Sherpa ONNX TTS", desc: "Local text-to-speech via sherpa-onnx (offline)." },
-    { id: "skill-creator", name: "Skill Creator", desc: "Create or update AgentSkills." },
-    { id: "slack", name: "Slack", desc: "Control Slack (messages, reactions, pins).", requiresAuth: true, authPlaceholder: "Bot Token" },
-    { id: "songsee", name: "SongSee", desc: "Generate spectrograms and feature-panel visualizations." },
-    { id: "sonoscli", name: "Sonos", desc: "Control Sonos speakers (status, playback, volume)." },
-    { id: "spotify-player", name: "Spotify", desc: "Terminal Spotify playback/search via spogo." },
-    { id: "summarize", name: "Summarize", desc: "Summarize text/transcripts from URLs and files." },
-    { id: "things-mac", name: "Things 3", desc: "Manage Things 3 on macOS (add, list, search tasks)." },
-    { id: "tmux", name: "Tmux", desc: "Remote-control tmux sessions for interactive CLIs." },
-    { id: "trello", name: "Trello", desc: "Manage Trello boards, lists, and cards.", requiresAuth: true, authPlaceholder: "API Key & Token" },
-    { id: "video-frames", name: "Video Frames", desc: "Extract frames or short clips from videos." },
-    { id: "voice-call", name: "Voice Call", desc: "Start voice calls via the OpenClaw voice-call plugin." },
-    { id: "wacli", name: "WhatsApp", desc: "Send WhatsApp messages via wacli CLI." },
-    { id: "weather", name: "Weather", desc: "Get current weather and forecasts." }
-  ];
+  const availableSkills = AVAILABLE_SKILLS;
+
+  // Apply agent type preset - sets all relevant state from a preset
+  function applyAgentTypePreset(typeId: AgentTypeId) {
+    setAgentType(typeId);
+    if (typeId === "custom") return;
+
+    const preset = AGENT_TYPE_PRESETS[typeId];
+    if (!preset) return;
+
+    // Set provider and model
+    setProvider(preset.provider);
+    setModel(preset.model);
+
+    // Set fallbacks
+    setFallbackModels(preset.fallbackModels);
+    setEnableFallbacks(preset.enableFallbacks);
+
+    // Set skills
+    setSelectedSkills(preset.skills);
+
+    // Set security
+    setSandboxMode(preset.sandboxMode);
+    setToolsMode(preset.toolsMode);
+    setAllowedTools(preset.allowedTools);
+
+    // Set session
+    setHeartbeatMode(preset.heartbeatMode);
+    setIdleTimeoutMs(preset.idleTimeoutMs);
+
+    // Set markdown files
+    let newIdentity = preset.identityMd;
+    let newSoul = preset.soulMd;
+    if (agentName) {
+      newIdentity = updateIdentityField(newIdentity, "Name", agentName);
+      newSoul = updateSoulMission(newSoul, agentName);
+    }
+    if (agentEmoji) {
+      newIdentity = updateIdentityField(newIdentity, "Emoji", agentEmoji);
+    }
+    setIdentityMd(newIdentity);
+    setSoulMd(newSoul);
+    setToolsMd(preset.toolsMd);
+    setAgentsMd(preset.agentsMd);
+    setHeartbeatMd(preset.heartbeatMd);
+    setMemoryMd(preset.memoryMd);
+    setMemoryEnabled(preset.memoryEnabled);
+  }
+
+  const isPresetAgent = agentType !== "custom";
 
   const stepsList = [
     { id: 0, name: "System State", hidden: true },
@@ -714,17 +215,20 @@ function App() {
     { id: 3, name: "Security" },
     { id: 5, name: "Identity" },
     { id: 6, name: "Agent" },
+    { id: 6.5, name: "Type" },
+    { id: 6.7, name: "Config", hidden: !isPresetAgent },
     { id: 7, name: "Gateway", advanced: true },
-    { id: 8, name: "Brain" },
+    { id: 8, name: "Brain", hidden: isPresetAgent },
     { id: 9, name: "Channels" },
     { id: 10, name: "Runtime", advanced: true },
     { id: 10.5, name: "Workspace", advanced: true },
-    { id: 11, name: "Skills", advanced: true },
-    { id: 12, name: "Security+", advanced: true },
-    { id: 13, name: "Fallbacks", advanced: true },
-    { id: 14, name: "Session", advanced: true },
-    { id: 15, name: "Agents", advanced: true },
-    { id: 16, name: "Review", hidden: true },
+    { id: 11, name: "Skills", advanced: true, hidden: isPresetAgent },
+    { id: 12, name: "Security+", advanced: true, hidden: isPresetAgent },
+    { id: 13, name: "Fallbacks", advanced: true, hidden: isPresetAgent },
+    { id: 14, name: "Session", advanced: true, hidden: isPresetAgent },
+    { id: 15, name: "Functions", advanced: true },
+    { id: 15.5, name: "Agents", advanced: true, hidden: true },
+    { id: 16, name: "Review" },
     { id: 17, name: "Pairing" }
   ];
 
@@ -982,7 +486,6 @@ function App() {
     if (!initial) return null;
     const defaultIdentity = `# IDENTITY.md - Who Am I?
 - **Name:** ${initial.agent_name}
-- **Vibe:** ${initial.agent_vibe}
 - **Emoji:** ${initial.agent_emoji || "🦞"}
 ---
 Managed by ClawSetup.`;
@@ -996,7 +499,7 @@ Managed by ClawSetup.`;
       model: initial.model,
       user_name: initial.user_name,
       agent_name: initial.agent_name,
-      agent_vibe: initial.agent_vibe,
+      agent_vibe: initial.agent_vibe || "",
       telegram_token: initial.telegram_token || "",
       gateway_port: initial.gateway_port,
       gateway_bind: initial.gateway_bind,
@@ -1021,17 +524,23 @@ Managed by ClawSetup.`;
         model: a.model,
         fallback_models: (a.fallback_models && a.fallback_models.length > 0) ? a.fallback_models : null,
         skills: (a.skills && a.skills.length > 0) ? a.skills : null,
-        vibe: a.vibe,
+        vibe: a.vibe || "",
         identity_md: a.identity_md || `# IDENTITY.md - Who Am I?
 - **Name:** ${a.name}
-- **Vibe:** ${a.vibe}
 - **Emoji:** ${a.emoji || "🦞"}
 ---
 Managed by ClawSetup.`,
         user_md: a.user_md || null,
         soul_md: a.soul_md || null
       })) : null,
-      preserve_state: isPaired
+      preserve_state: isPaired,
+      agent_type: initial.agent_type || "custom",
+      tools_md: initial.tools_md || null,
+      agents_md: initial.agents_md || null,
+      heartbeat_md: initial.heartbeat_md || null,
+      memory_md: initial.memory_md || null,
+      memory_enabled: initial.memory_enabled || false,
+      cron_jobs: initial.cron_jobs || null,
     };
   }
 
@@ -1039,10 +548,12 @@ Managed by ClawSetup.`,
     const mappedSandboxMode = sandboxMode === "full" ? "all" : (sandboxMode === "partial" ? "non-main" : "off");
     const defaultIdentity = `# IDENTITY.md - Who Am I?
 - **Name:** ${agentName}
-- **Vibe:** ${agentVibe}
 - **Emoji:** ${agentEmoji}
 ---
 Managed by ClawSetup.`;
+
+    // For preset agents, always include preset-configured fields
+    const usePresetFields = isPresetAgent || mode === "advanced";
 
     return {
         provider,
@@ -1051,7 +562,7 @@ Managed by ClawSetup.`;
         model,
         user_name: userName,
         agent_name: agentName,
-        agent_vibe: agentVibe,
+        agent_vibe: "",
         telegram_token: telegramToken,
         gateway_port: gatewayPort,
         gateway_bind: gatewayBind,
@@ -1060,16 +571,16 @@ Managed by ClawSetup.`;
         node_manager: nodeManager,
         skills: selectedSkills,
         service_keys: serviceKeys,
-        sandbox_mode: mode === "advanced" ? mappedSandboxMode : null,
-        tools_mode: mode === "advanced" ? toolsMode : null,
-        allowed_tools: mode === "advanced" && toolsMode === "allowlist" ? allowedTools : null,
-        denied_tools: mode === "advanced" && toolsMode === "denylist" ? deniedTools : null,
-        fallback_models: mode === "advanced" && enableFallbacks ? fallbackModels.filter(m => m) : null,
-        heartbeat_mode: mode === "advanced" ? heartbeatMode : null,
-        idle_timeout_ms: mode === "advanced" && heartbeatMode === "idle" ? idleTimeoutMs : null,
-        identity_md: (mode === "advanced" && identityMd) ? identityMd : defaultIdentity,
-        user_md: mode === "advanced" && userMd ? userMd : null,
-        soul_md: mode === "advanced" && soulMd ? soulMd : null,
+        sandbox_mode: usePresetFields ? mappedSandboxMode : null,
+        tools_mode: usePresetFields ? toolsMode : null,
+        allowed_tools: usePresetFields && toolsMode === "allowlist" ? allowedTools : null,
+        denied_tools: usePresetFields && toolsMode === "denylist" ? deniedTools : null,
+        fallback_models: usePresetFields && enableFallbacks ? fallbackModels.filter(m => m) : null,
+        heartbeat_mode: usePresetFields ? heartbeatMode : null,
+        idle_timeout_ms: usePresetFields && heartbeatMode === "idle" ? idleTimeoutMs : null,
+        identity_md: (usePresetFields && identityMd) ? identityMd : defaultIdentity,
+        user_md: usePresetFields && userMd ? userMd : null,
+        soul_md: usePresetFields && soulMd ? soulMd : null,
         agents: enableMultiAgent ? agentConfigs.map(a => ({
           id: a.id,
           name: a.name,
@@ -1079,14 +590,21 @@ Managed by ClawSetup.`;
           vibe: a.vibe,
           identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
 - **Name:** ${a.name}
-- **Vibe:** ${a.vibe}
 - **Emoji:** ${a.emoji || "🦞"}
 ---
 Managed by ClawSetup.`,
           user_md: a.userMd || null,
           soul_md: a.soulMd || null
         })) : null,
-        preserve_state: isPaired
+        preserve_state: isPaired,
+        // New preset fields
+        agent_type: agentType,
+        tools_md: usePresetFields && toolsMd ? toolsMd : null,
+        agents_md: usePresetFields && agentsMd ? agentsMd : null,
+        heartbeat_md: usePresetFields && heartbeatMd ? heartbeatMd : null,
+        memory_md: usePresetFields && memoryMd ? memoryMd : null,
+        memory_enabled: usePresetFields ? memoryEnabled : false,
+        cron_jobs: cronJobs.length > 0 ? cronJobs : null,
     };
   }
 
@@ -1362,8 +880,8 @@ Managed by ClawSetup.`,
       setModel(config.model);
       setUserName(config.user_name);
       setAgentName(config.agent_name);
-      setAgentVibe(config.agent_vibe);
       setAgentEmoji(config.agent_emoji || "🦞");
+      setAgentType(config.agent_type || "custom");
       setTelegramToken(config.telegram_token);
       
       setGatewayPort(config.gateway_port);
@@ -1395,6 +913,14 @@ Managed by ClawSetup.`,
         user: config.user_md,
         soul: config.soul_md
       });
+
+      // Load new preset fields
+      if (config.tools_md) setToolsMd(config.tools_md);
+      if (config.agents_md) setAgentsMd(config.agents_md);
+      if (config.heartbeat_md) setHeartbeatMd(config.heartbeat_md);
+      if (config.memory_md) setMemoryMd(config.memory_md);
+      if (config.memory_enabled !== undefined) setMemoryEnabled(config.memory_enabled);
+      if (config.cron_jobs) setCronJobs(config.cron_jobs);
 
       setEnableMultiAgent(config.enable_multi_agent);
       if (config.enable_multi_agent && config.agent_configs) {
@@ -1948,31 +1474,153 @@ Managed by ClawSetup.`,
                 ))}
               </div>
             </div>
-            <div className="form-group">
-              <label>Agent Vibe</label>
-              <RadioCard
-                value={agentVibe}
-                onChange={(val) => {
-                  setAgentVibe(val);
-                  if (identityMd) {
-                    setIdentityMd(updateIdentityField(identityMd, "Vibe", val));
-                  }
-                }}
-                columns={2}
-                options={[
-                  { value: "Professional", label: "Professional" },
-                  { value: "Friendly", label: "Friendly" },
-                  { value: "Chaos", label: "Chaos" },
-                  { value: "Helpful Assistant", label: "Helpful Assistant" }
-                ]}
-              />
-            </div>
             <div className="button-group">
-              <button className="primary" disabled={!agentName} onClick={() => setStep(8)}>Next</button>
+              <button className="primary" disabled={!agentName} onClick={() => setStep(6.5)}>Next</button>
               <button className="secondary" onClick={() => setStep(skipBasicConfig ? 0 : 5)}>Back</button>
             </div>
           </div>
         );
+      case 6.5:
+        return (
+          <div className="step-view">
+            <h2>Agent Type</h2>
+            <p className="step-description">Choose a pre-configured agent type or build your own from scratch.</p>
+            <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem"}}>
+              {[
+                { id: "coding-assistant" as AgentTypeId, name: "Coding Assistant", emoji: "👨‍💻", desc: "A senior software engineer that writes clean, secure code." },
+                { id: "office-assistant" as AgentTypeId, name: "Office Assistant", emoji: "🤵", desc: "A professional executive assistant for email, tasks, and comms." },
+                { id: "travel-planner" as AgentTypeId, name: "Travel Planner", emoji: "🌍", desc: "An expert travel agent that plans trips and finds deals." },
+                { id: "custom" as AgentTypeId, name: "Custom", emoji: "🔧", desc: "Configure everything manually from scratch." }
+              ].map(t => (
+                <div
+                  key={t.id}
+                  className={`mode-card ${agentType === t.id ? "active" : ""}`}
+                  onClick={() => {
+                    applyAgentTypePreset(t.id);
+                  }}
+                  style={{
+                    padding: "1.5rem",
+                    borderRadius: "12px",
+                    border: agentType === t.id ? "2px solid var(--primary)" : "1px solid var(--border)",
+                    backgroundColor: agentType === t.id ? "rgba(255, 75, 43, 0.05)" : "var(--bg-card)",
+                    cursor: "pointer",
+                    textAlign: "center"
+                  }}
+                >
+                  <div style={{fontSize: "2rem", marginBottom: "0.5rem"}}>{t.emoji}</div>
+                  <div style={{fontWeight: 600, marginBottom: "0.25rem"}}>{t.name}</div>
+                  <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>{t.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="button-group" style={{marginTop: "1.5rem"}}>
+              <button className="primary" onClick={() => {
+                if (isPresetAgent) {
+                  setStep(6.7);
+                } else {
+                  setStep(8);
+                }
+              }}>Next</button>
+              <button className="secondary" onClick={() => setStep(6)}>Back</button>
+            </div>
+          </div>
+        );
+      case 6.7: {
+        const presetData = AGENT_TYPE_PRESETS[agentType];
+        return (
+          <div className="step-view">
+            <h2>Configuration Review</h2>
+            <p className="step-description">Your {presetData?.name || "agent"} is pre-configured with these settings. Enter your API key to continue.</p>
+
+            {presetData && (
+              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.5rem"}}>
+                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
+                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Model</div>
+                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.model.split("/").pop()}</div>
+                </div>
+                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
+                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Fallback</div>
+                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.fallbackModels[0]?.split("/").pop() || "None"}</div>
+                </div>
+                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
+                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Skills</div>
+                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.skills.length} configured</div>
+                </div>
+                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
+                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Heartbeat</div>
+                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.heartbeatMode === "never" ? "Disabled" : `Every ${presetData.heartbeatMode}`}</div>
+                </div>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label>Skills Included</label>
+              <div style={{display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.25rem"}}>
+                {selectedSkills.map(s => (
+                  <span key={s} style={{
+                    padding: "0.25rem 0.75rem",
+                    borderRadius: "20px",
+                    backgroundColor: "rgba(255, 75, 43, 0.1)",
+                    border: "1px solid var(--primary)",
+                    fontSize: "0.8rem",
+                    fontWeight: 500
+                  }}>
+                    {SKILL_ICONS[s] && <img src={SKILL_ICONS[s]} alt="" style={{width: "14px", height: "14px", marginRight: "4px", verticalAlign: "middle", borderRadius: "3px"}} />}
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="form-group" style={{marginTop: "1.5rem"}}>
+              <label>AI Provider API Key</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={`Enter your ${provider} API key`}
+                autoComplete="off"
+              />
+              <p className="input-hint" style={{marginTop: "0.25rem", fontSize: "0.8rem"}}>
+                Required for {provider}. Get one from the provider's dashboard.
+              </p>
+            </div>
+
+            {/* Show auth keys for skills that require them */}
+            {selectedSkills.filter(s => {
+              const skill = availableSkills.find(sk => sk.id === s);
+              return skill?.requiresAuth;
+            }).length > 0 && (
+              <div className="form-group" style={{marginTop: "1rem"}}>
+                <label>Skill API Keys (Optional)</label>
+                {selectedSkills.filter(s => {
+                  const skill = availableSkills.find(sk => sk.id === s);
+                  return skill?.requiresAuth;
+                }).map(s => {
+                  const skill = availableSkills.find(sk => sk.id === s)!;
+                  return (
+                    <div key={s} style={{marginTop: "0.5rem"}}>
+                      <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>{skill.name}</label>
+                      <input
+                        type="password"
+                        value={serviceKeys[s] || ""}
+                        onChange={(e) => setServiceKeys({...serviceKeys, [s]: e.target.value})}
+                        placeholder={skill.authPlaceholder || "API Key"}
+                        autoComplete="off"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="button-group" style={{marginTop: "1.5rem"}}>
+              <button className="primary" disabled={!apiKey} onClick={() => setStep(9)}>Next</button>
+              <button className="secondary" onClick={() => setStep(6.5)}>Back</button>
+            </div>
+          </div>
+        );
+      }
       case 7:
         return (
           <div className="step-view">
@@ -2591,59 +2239,125 @@ Managed by ClawSetup.`,
       case 15:
         return (
           <div className="step-view">
-            <h2>Multiple Agents</h2>
-            <p className="step-description">Configure multiple specialized agents with unique models and skills.</p>
+            <h2>Business Functions & Multi-Agent</h2>
+            <p className="step-description">Add specialized business functions with pre-configured sub-agents, or set up custom multi-agent configurations.</p>
 
-            <div className="mode-card-container">
-              <div className={`mode-card ${!enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(false)}>
-                <h3>Single Agent</h3>
-                <p>Use one agent with the configured settings.</p>
-              </div>
-              <div className={`mode-card ${enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(true)}>
-                <h3>Multi-Agent</h3>
-                <p>Configure multiple agents (2-5) with different configurations.</p>
+            <div style={{marginBottom: "1.5rem"}}>
+              <label style={{fontWeight: 600, marginBottom: "0.75rem", display: "block"}}>Business Functions</label>
+              <p className="input-hint" style={{marginBottom: "0.75rem"}}>Select functions to add pre-configured sub-agents to your setup.</p>
+              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem"}}>
+                {Object.values(BUSINESS_FUNCTION_PRESETS).map(bf => (
+                  <div
+                    key={bf.id}
+                    className={`mode-card ${selectedBusinessFunctions.includes(bf.id) ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedBusinessFunctions(prev =>
+                        prev.includes(bf.id) ? prev.filter(id => id !== bf.id) : [...prev, bf.id]
+                      );
+                    }}
+                    style={{
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      border: selectedBusinessFunctions.includes(bf.id) ? "2px solid var(--primary)" : "1px solid var(--border)",
+                      backgroundColor: selectedBusinessFunctions.includes(bf.id) ? "rgba(255, 75, 43, 0.05)" : "var(--bg-card)",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <div style={{display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem"}}>
+                      <span style={{fontSize: "1.2rem"}}>{bf.emoji}</span>
+                      <span style={{fontWeight: 600, fontSize: "0.9rem"}}>{bf.name}</span>
+                    </div>
+                    <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>{bf.description}</div>
+                    <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem"}}>
+                      {bf.subAgents.length} sub-agent{bf.subAgents.length !== 1 ? "s" : ""}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {enableMultiAgent && (
-              <div className="form-group" style={{marginTop: "2rem"}}>
-                <label>Number of Agents</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="5"
-                  value={numAgents}
-                  onChange={(e) => {
-                    const num = parseInt(e.target.value) || 1;
-                    setNumAgents(Math.max(1, Math.min(5, num)));
-                  }}
-                  autoComplete="off"
-                />
-                <p className="input-hint">You can configure 1-5 specialized agents</p>
+            <div style={{borderTop: "1px solid var(--border)", paddingTop: "1.5rem"}}>
+              <label style={{fontWeight: 600, marginBottom: "0.5rem", display: "block"}}>Custom Multi-Agent</label>
+              <div className="mode-card-container">
+                <div className={`mode-card ${!enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(false)}>
+                  <h3>Single Agent</h3>
+                  <p>Use one agent with the configured settings.</p>
+                </div>
+                <div className={`mode-card ${enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(true)}>
+                  <h3>Custom Multi-Agent</h3>
+                  <p>Manually configure multiple agents (2-5).</p>
+                </div>
               </div>
-            )}
 
-            <div className="button-group">
+              {enableMultiAgent && (
+                <div className="form-group" style={{marginTop: "1rem"}}>
+                  <label>Number of Custom Agents</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={numAgents}
+                    onChange={(e) => {
+                      const num = parseInt(e.target.value) || 1;
+                      setNumAgents(Math.max(1, Math.min(5, num)));
+                    }}
+                    autoComplete="off"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="button-group" style={{marginTop: "1.5rem"}}>
               <button className="primary" onClick={() => {
+                // Apply business function presets
+                if (selectedBusinessFunctions.length > 0) {
+                  const allAgents: typeof agentConfigs = [];
+                  const allCronJobs: CronJobConfig[] = [];
+
+                  for (const bfId of selectedBusinessFunctions) {
+                    const bf = BUSINESS_FUNCTION_PRESETS[bfId];
+                    if (!bf) continue;
+
+                    // Add sub-agents from each business function
+                    for (const sub of bf.subAgents) {
+                      allAgents.push({
+                        id: sub.id,
+                        name: sub.name,
+                        model: sub.model,
+                        fallbackModels: [],
+                        skills: sub.skills,
+                        vibe: "",
+                        emoji: "🤖",
+                        identityMd: sub.identityMd,
+                        userMd: "",
+                        soulMd: sub.soulMd,
+                      });
+                    }
+
+                    // Collect cron jobs
+                    allCronJobs.push(...bf.cronJobs);
+                  }
+
+                  if (allAgents.length > 0) {
+                    setEnableMultiAgent(true);
+                    setAgentConfigs(prev => [...prev, ...allAgents]);
+                    setNumAgents(prev => prev + allAgents.length);
+                  }
+                  setCronJobs(allCronJobs);
+                }
+
                 if (enableMultiAgent) {
-                  // Only initialize agent configs if they don't exist or are empty
-                  // This preserves configs loaded from reconfigure
                   if (agentConfigs.length === 0 || agentConfigs.length !== numAgents) {
                     const configs = Array.from({ length: numAgents }, (_, i) => {
-                      // Check if we already have a config for this index (from loaded data)
                       const existingConfig = agentConfigs[i];
-                      if (existingConfig && existingConfig.id) {
-                        // Preserve existing config
-                        return existingConfig;
-                      }
-                      // Create new default config
+                      if (existingConfig && existingConfig.id) return existingConfig;
                       return {
                         id: `agent-${i + 1}`,
                         name: `Agent ${i + 1}`,
-                        model: model, // Default to main model
+                        model: model,
                         fallbackModels: [],
-                        skills: [], // Start empty
-                        vibe: agentVibe,
+                        skills: [],
+                        vibe: "",
                         emoji: agentEmoji,
                         identityMd: "",
                         userMd: "",
@@ -2653,13 +2367,13 @@ Managed by ClawSetup.`,
                     setAgentConfigs(configs);
                   }
                   setCurrentAgentConfigIdx(0);
-                  setActiveWorkspaceTab("identity"); // Reset tab
+                  setActiveWorkspaceTab("identity");
                   setStep(15.5);
                 } else {
                   setStep(16);
                 }
               }} disabled={loading}>
-                {enableMultiAgent ? "Continue" : "Next"}
+                {enableMultiAgent || selectedBusinessFunctions.length > 0 ? "Configure Agents" : "Next"}
               </button>
               <button className="secondary" onClick={() => setStep(14)} disabled={loading}>Back</button>
             </div>
@@ -3055,7 +2769,7 @@ case 16:
                   Next
                 </button>
               )}
-              <button className="secondary" onClick={() => setStep(mode === "advanced" ? 15.5 : 9)} disabled={loading}>Back</button>
+              <button className="secondary" onClick={() => setStep(mode === "advanced" ? (enableMultiAgent ? 15.5 : 15) : 9)} disabled={loading}>Back</button>
             </div>
           </div>
         );
@@ -3122,7 +2836,7 @@ case 16:
                   rows={12}
                   value={identityMd}
                   onChange={e => setIdentityMd(e.target.value)}
-                  placeholder={`# IDENTITY.md - Who Am I?\n- **Name:** ${agentName}\n- **Vibe:** ${agentVibe}\n- **Emoji:** ${agentEmoji}\n\nAdd more details about your agent's identity...`}
+                  placeholder={`# IDENTITY.md - Who Am I?\n- **Name:** ${agentName}\n- **Emoji:** ${agentEmoji}\n\nAdd more details about your agent's identity...`}
                 />
               )}
               {activeWorkspaceTab === "user" && (

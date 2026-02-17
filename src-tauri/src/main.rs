@@ -26,11 +26,42 @@ struct AgentData {
     model: String,
     fallback_models: Option<Vec<String>>,
     skills: Option<Vec<String>>,
-    vibe: String,
+    vibe: Option<String>,
     emoji: Option<String>,
     identity_md: Option<String>,
     user_md: Option<String>,
     soul_md: Option<String>,
+    tools_md: Option<String>,
+    agents_md: Option<String>,
+    heartbeat_md: Option<String>,
+    memory_md: Option<String>,
+    subagents: Option<SubagentConfig>,
+    tools: Option<AgentToolsConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct SubagentConfig {
+    #[serde(rename = "allowAgents")]
+    allow_agents: Vec<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct AgentToolsConfig {
+    #[serde(rename = "agentToAgent")]
+    agent_to_agent: Option<AgentToAgentConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct AgentToAgentConfig {
+    enabled: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct CronJobConfig {
+    name: String,
+    schedule: String,
+    command: String,
+    session: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -43,6 +74,7 @@ struct CurrentConfig {
     agent_name: String,
     agent_vibe: String,
     agent_emoji: String,
+    agent_type: String,
     telegram_token: String,
     gateway_port: u16,
     gateway_bind: String,
@@ -61,9 +93,15 @@ struct CurrentConfig {
     identity_md: String,
     user_md: String,
     soul_md: String,
+    tools_md: Option<String>,
+    agents_md: Option<String>,
+    heartbeat_md: Option<String>,
+    memory_md: Option<String>,
+    memory_enabled: bool,
     enable_multi_agent: bool,
     agent_configs: Vec<AgentData>,
     is_paired: bool,
+    cron_jobs: Option<Vec<CronJobConfig>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -74,7 +112,7 @@ struct AgentConfig {
     model: String,
     user_name: String,
     agent_name: String,
-    agent_vibe: String,
+    agent_vibe: Option<String>,
     telegram_token: Option<String>,
     // Advanced fields
     gateway_port: Option<u16>,
@@ -99,6 +137,14 @@ struct AgentConfig {
     agents: Option<Vec<AgentData>>,
     // New field to preserve state during updates
     preserve_state: Option<bool>,
+    // New preset fields
+    agent_type: Option<String>,
+    tools_md: Option<String>,
+    agents_md: Option<String>,
+    heartbeat_md: Option<String>,
+    memory_md: Option<String>,
+    memory_enabled: Option<bool>,
+    cron_jobs: Option<Vec<CronJobConfig>>,
 }
 
 #[derive(serde::Serialize)]
@@ -627,10 +673,9 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     let identity_md = config.identity_md.unwrap_or_else(|| {
         format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
-- **Vibe:** {}
 - **Emoji:** 🦞
 ---
-Managed by ClawSetup."#, config.agent_name, config.agent_vibe)
+Managed by ClawSetup."#, config.agent_name)
     }).replace("'", "'\\''");
     execute_ssh(&sess, &format!("echo '{}' > {}/IDENTITY.md", identity_md, workspace))?;
 
@@ -680,10 +725,9 @@ Serve {}."#, config.user_name)
             let a_identity = agent.identity_md.clone().unwrap_or_else(|| {
                  format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
-- **Vibe:** {}
 - **Emoji:** 🦞
 ---
-Managed by ClawSetup."#, agent.name, agent.vibe)
+Managed by ClawSetup."#, agent.name)
             }).replace("'", "'\\''");
             execute_ssh(&sess, &format!("echo '{}' > {}/IDENTITY.md", a_identity, agent_workspace))?;
 
@@ -1166,6 +1210,31 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         }
     }
 
+    // Add memory configuration
+    if config.memory_enabled.unwrap_or(false) {
+        if let Some(defaults) = config_json.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
+            if let Some(compaction) = defaults.get_mut("compaction").and_then(|c| c.as_object_mut()) {
+                compaction.insert("memoryFlush".to_string(), serde_json::Value::Bool(true));
+            }
+        }
+    }
+
+    // Add cron configuration
+    if let Some(cron_jobs) = &config.cron_jobs {
+        if !cron_jobs.is_empty() {
+            if let Some(obj) = config_json.as_object_mut() {
+                obj.insert("cron".to_string(), serde_json::to_value(cron_jobs).unwrap_or_default());
+            }
+        }
+    }
+
+    // Store agent_type for later retrieval
+    if let Some(agent_type) = &config.agent_type {
+        if let Some(obj) = config_json.as_object_mut() {
+            obj.insert("agent_type".to_string(), serde_json::Value::String(agent_type.clone()));
+        }
+    }
+
     let config_json_raw = serde_json::to_string_pretty(&config_json).map_err(|e| e.to_string())?;
 
     fs::write(openclaw_root.join("openclaw.json"), config_json_raw).map_err(|e| e.to_string())?;
@@ -1181,10 +1250,9 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
             let agent_identity = agent.identity_md.clone().unwrap_or_else(|| {
                 format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
-- **Vibe:** {}
 - **Emoji:** 🦞
 ---
-Managed by ClawSetup."#, agent.name, agent.vibe)
+Managed by ClawSetup."#, agent.name)
             });
             fs::write(agent_workspace.join("IDENTITY.md"), agent_identity).map_err(|e| e.to_string())?;
 
@@ -1201,6 +1269,20 @@ Managed by ClawSetup."#, agent.name, agent.vibe)
 Serve {}."#, config.user_name)
             });
             fs::write(agent_workspace.join("SOUL.md"), agent_soul_md).map_err(|e| e.to_string())?;
+
+            // Write additional markdown files for sub-agents
+            if let Some(ref tools_md) = agent.tools_md {
+                fs::write(agent_workspace.join("TOOLS.md"), tools_md).map_err(|e| e.to_string())?;
+            }
+            if let Some(ref agents_md) = agent.agents_md {
+                fs::write(agent_workspace.join("AGENTS.md"), agents_md).map_err(|e| e.to_string())?;
+            }
+            if let Some(ref heartbeat_md) = agent.heartbeat_md {
+                fs::write(agent_workspace.join("HEARTBEAT.md"), heartbeat_md).map_err(|e| e.to_string())?;
+            }
+            if let Some(ref memory_md) = agent.memory_md {
+                fs::write(agent_workspace.join("MEMORY.md"), memory_md).map_err(|e| e.to_string())?;
+            }
 
             let mut agent_profiles_map = serde_json::Map::new();
             let mut primary_ai = serde_json::Map::new();
@@ -1285,12 +1367,25 @@ Serve {}."#, config.user_name)
     } else {
         format!(r#"# IDENTITY.md - Who Am I?
 - **Name:** {}
-- **Vibe:** {}
 - **Emoji:** 🦞
 ---
-Managed by ClawSetup."#, config.agent_name, config.agent_vibe)
+Managed by ClawSetup."#, config.agent_name)
     };
-    fs::write(workspace.join("IDENTITY.md"), identity_md).map_err(|e| e.to_string())?;
+    fs::write(workspace.join("IDENTITY.md"), &identity_md).map_err(|e| e.to_string())?;
+
+    // Write additional markdown files if provided
+    if let Some(tools_md) = &config.tools_md {
+        fs::write(workspace.join("TOOLS.md"), tools_md).map_err(|e| e.to_string())?;
+    }
+    if let Some(agents_md) = &config.agents_md {
+        fs::write(workspace.join("AGENTS.md"), agents_md).map_err(|e| e.to_string())?;
+    }
+    if let Some(heartbeat_md) = &config.heartbeat_md {
+        fs::write(workspace.join("HEARTBEAT.md"), heartbeat_md).map_err(|e| e.to_string())?;
+    }
+    if let Some(memory_md) = &config.memory_md {
+        fs::write(workspace.join("MEMORY.md"), memory_md).map_err(|e| e.to_string())?;
+    }
 
     let user_md = if let Some(custom) = config.user_md {
         custom
@@ -1806,17 +1901,29 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
              let askills = list_directories(&format!("{}/skills", agent_workspace_base));
              let askills_opt = if askills.is_empty() { None } else { Some(askills) };
 
+             // Read additional md files for sub-agent
+             let a_tools_md = fs::read_to_string(format!("{}/TOOLS.md", agent_workspace_base)).ok();
+             let a_agents_md = fs::read_to_string(format!("{}/AGENTS.md", agent_workspace_base)).ok();
+             let a_heartbeat_md = fs::read_to_string(format!("{}/HEARTBEAT.md", agent_workspace_base)).ok();
+             let a_memory_md = fs::read_to_string(format!("{}/MEMORY.md", agent_workspace_base)).ok();
+
              agent_configs.push(AgentData {
                  id: aid,
                  name,
                  model: amodel,
                  fallback_models: Some(afallbacks),
                  skills: askills_opt,
-                 vibe: avibe,
+                 vibe: if avibe.is_empty() { None } else { Some(avibe) },
                  emoji: Some(aemoji),
                  identity_md: Some(aid_md),
                  user_md: Some(au_md),
-                 soul_md: Some(as_md)
+                 soul_md: Some(as_md),
+                 tools_md: a_tools_md,
+                 agents_md: a_agents_md,
+                 heartbeat_md: a_heartbeat_md,
+                 memory_md: a_memory_md,
+                 subagents: None,
+                 tools: None,
              });
          }
     }
@@ -1832,6 +1939,28 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     
     let is_paired = dm_policy != "pairing";
 
+    // Read additional workspace markdown files
+    let tools_md_str = fs::read_to_string(format!("{}/.openclaw/workspace/TOOLS.md", home_dir)).ok();
+    let agents_md_str = fs::read_to_string(format!("{}/.openclaw/workspace/AGENTS.md", home_dir)).ok();
+    let heartbeat_md_str = fs::read_to_string(format!("{}/.openclaw/workspace/HEARTBEAT.md", home_dir)).ok();
+    let memory_md_str = fs::read_to_string(format!("{}/.openclaw/workspace/MEMORY.md", home_dir)).ok();
+
+    // Check memory enabled
+    let memory_enabled = defaults.get("compaction")
+        .and_then(|c| c.get("memoryFlush"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Read cron jobs
+    let cron_jobs: Option<Vec<CronJobConfig>> = oc_config.get("cron")
+        .and_then(|c| serde_json::from_value(c.clone()).ok());
+
+    // Detect agent type from stored config or default to "custom"
+    let agent_type = oc_config.get("agent_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("custom")
+        .to_string();
+
     Ok(CurrentConfig {
         provider,
         api_key,
@@ -1841,14 +1970,15 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
         agent_name,
         agent_vibe,
         agent_emoji,
+        agent_type,
         telegram_token,
         gateway_port,
         gateway_bind,
         gateway_auth_mode,
         tailscale_mode,
-        node_manager: "npm".to_string(), 
+        node_manager: "npm".to_string(),
         skills,
-        service_keys: std::collections::HashMap::new(), 
+        service_keys: std::collections::HashMap::new(),
         sandbox_mode: mapped_sandbox.to_string(),
         tools_mode: tools_mode.to_string(),
         allowed_tools,
@@ -1859,9 +1989,15 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
         identity_md: identity_str,
         user_md: user_str,
         soul_md: soul_str,
+        tools_md: tools_md_str,
+        agents_md: agents_md_str,
+        heartbeat_md: heartbeat_md_str,
+        memory_md: memory_md_str,
+        memory_enabled,
         enable_multi_agent,
         agent_configs,
-        is_paired
+        is_paired,
+        cron_jobs,
     })
 }
 
@@ -1973,13 +2109,11 @@ mod tests {
             "model": "anthropic/claude-opus-4-6",
             "user_name": "Test User",
             "agent_name": "Test Agent",
-            "agent_vibe": "Professional",
             "agents": [
                 {
                     "id": "agent-1",
                     "name": "SubAgent 1",
                     "model": "openai/gpt-4o",
-                    "vibe": "Friendly",
                     "emoji": "🤖"
                 }
             ]
