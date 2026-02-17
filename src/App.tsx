@@ -16,7 +16,7 @@ function App() {
   const handleAdvancedTransition = async () => {
     // Check if we already verified license in this session
     if (maintCompleted) {
-       setStep(7);
+       setStep(10.5);
        return;
     }
     setShowLicenseModal(true);
@@ -117,22 +117,18 @@ function App() {
   const [selectedBusinessFunctions, setSelectedBusinessFunctions] = useState<BusinessFunctionId[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobConfig[]>([]);
 
+  // Extra Settings accordion state
+  const [extraSettingsOpen, setExtraSettingsOpen] = useState<Record<string, boolean>>({
+    gateway: false,
+    runtime: false,
+    security: false,
+    session: false
+  });
+
   // NEW: Multi-Agent (Step 15)
   const [enableMultiAgent, setEnableMultiAgent] = useState(false);
   const [numAgents, setNumAgents] = useState(1);
-  const [agentConfigs, setAgentConfigs] = useState<Array<{
-    id: string;
-    name: string;
-    model: string;
-    fallbackModels: string[];
-    skills: string[];
-    vibe: string;
-    emoji: string;
-    identityMd: string;
-    userMd: string;
-    soulMd: string;
-    persona?: string;
-  }>>([]);
+  const [agentConfigs, setAgentConfigs] = useState<AgentConfigData[]>([]);
   const [currentAgentConfigIdx, setCurrentAgentConfigIdx] = useState(0);
   // const [isConfiguringAgent, setIsConfiguringAgent] = useState(false);
 
@@ -216,17 +212,15 @@ function App() {
     { id: 6, name: "Agent" },
     { id: 6.5, name: "Type" },
     { id: 6.7, name: "Config", hidden: !isPresetAgent },
-    { id: 7, name: "Gateway", advanced: true },
     { id: 8, name: "Brain", hidden: isPresetAgent },
     { id: 9, name: "Channels" },
-    { id: 10, name: "Runtime", advanced: true },
-    { id: 10.5, name: "Workspace", advanced: true },
-    { id: 11, name: "Skills", advanced: true, hidden: isPresetAgent },
-    { id: 12, name: "Security+", advanced: true, hidden: isPresetAgent },
+    { id: 10.5, name: "Personality", advanced: true },
     { id: 13, name: "Models", advanced: true, hidden: isPresetAgent },
-    { id: 14, name: "Session", advanced: true, hidden: isPresetAgent },
-    { id: 15, name: "Functions", advanced: true },
+    { id: 11, name: "Skills", advanced: true, hidden: isPresetAgent },
+    { id: 11.1, name: "Allowed Tools", advanced: true, hidden: isPresetAgent },
+    { id: 15, name: "Business", advanced: true },
     { id: 15.5, name: "Agents", advanced: true, hidden: true },
+    { id: 15.7, name: "Extra Settings", advanced: true },
     { id: 16, name: "Review" },
     { id: 17, name: "Pairing" }
   ];
@@ -522,7 +516,9 @@ Managed by ClawSetup.`;
 ---
 Managed by ClawSetup.`,
         user_md: a.user_md || null,
-        soul_md: a.soul_md || null
+        soul_md: a.soul_md || null,
+        tools_md: a.tools_md || null,
+        agents_md: a.agents_md || null,
       })) : null,
       preserve_state: isPaired,
       agent_type: initial.agent_type || "custom",
@@ -585,7 +581,9 @@ Managed by ClawSetup.`;
 ---
 Managed by ClawSetup.`,
           user_md: a.userMd || null,
-          soul_md: a.soulMd || null
+          soul_md: a.soulMd || null,
+          tools_md: a.toolsMd || null,
+          agents_md: a.agentsMd || null,
         })) : null,
         preserve_state: isPaired,
         // New preset fields
@@ -926,7 +924,11 @@ Managed by ClawSetup.`,
               emoji: a.emoji || "🦞",
               identityMd: a.identity_md || "",
               userMd: a.user_md || "",
-              soulMd: a.soul_md || ""
+              soulMd: a.soul_md || "",
+              toolsMd: a.tools_md || "",
+              agentsMd: a.agents_md || "",
+              allowedTools: a.allowed_tools || [],
+              cronJobs: a.cron_jobs || [],
           })));
       }
 
@@ -1753,7 +1755,7 @@ Managed by ClawSetup.`,
             </p>
             <div className="button-group">
               <button className="primary" onClick={() => setStep(9)}>Next</button>
-              <button className="secondary" onClick={() => setStep(mode === "advanced" ? 7 : 6)}>Back</button>
+              <button className="secondary" onClick={() => setStep(6.5)}>Back</button>
             </div>
           </div>
         );
@@ -1811,7 +1813,7 @@ Managed by ClawSetup.`,
       case 11:
         return (
           <div className="step-view">
-            <h2>Select Skills</h2>
+            <h2>Give {agentName ? `${agentName}` : "your agent"} some skills</h2>
             <p className="step-description">Enable capabilities and configure required keys.</p>
             <div className="skills-container" style={{maxHeight: "450px", overflowY: "auto", border: "1px solid var(--border)", borderRadius: "12px", padding: "0.5rem"}}>
               <div className="skills-grid">
@@ -1926,14 +1928,95 @@ Managed by ClawSetup.`,
 
             <div className="button-group">
               <button className="primary" onClick={() => {
-                // Skip Step 11.5 as auth is handled inline
                 if (mode === "advanced") {
-                  setStep(12);
+                  setStep(11.1);
                 } else {
                   handleInstall();
                 }
               }}>Continue</button>
-              <button className="secondary" onClick={() => setStep(10.5)}>Back</button>
+              <button className="secondary" onClick={() => setStep(13)}>Back</button>
+            </div>
+          </div>
+        );
+      case 11.1:
+        return (
+          <div className="step-view">
+            <h2>Allowed Tools</h2>
+            <p className="step-description">Configure which tools your agent is allowed to use.</p>
+
+            <div className="form-group">
+              <label>Tools Policy</label>
+              <Dropdown
+                value={toolsMode}
+                onChange={setToolsMode}
+                options={[
+                  { value: "allowlist", label: "Allowlist (Recommended)", description: "Only enable explicitly selected tools." },
+                  { value: "denylist", label: "Denylist", description: "Block specific tools." },
+                  { value: "all", label: "All Tools", description: "Enable all available tools." }
+                ]}
+              />
+            </div>
+
+            {toolsMode === "allowlist" && (
+              <div className="form-group" style={{marginTop: "1rem"}}>
+                <label>Core Tools</label>
+                <div className="skills-grid">
+                  {[
+                    {id: "filesystem", name: "File System"},
+                    {id: "terminal", name: "Terminal"},
+                    {id: "browser", name: "Browser"},
+                    {id: "network", name: "Network"}
+                  ].map(tool => (
+                    <div
+                      key={tool.id}
+                      className={`skill-card ${allowedTools.includes(tool.id) ? "active" : ""}`}
+                      onClick={() => {
+                        setAllowedTools(prev =>
+                          prev.includes(tool.id)
+                            ? prev.filter(t => t !== tool.id)
+                            : [...prev, tool.id]
+                        );
+                      }}
+                    >
+                      <div className="skill-name">{tool.name}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <label style={{marginTop: "1rem"}}>Skills as Tools</label>
+                <div className="skills-grid" style={{maxHeight: "300px", overflowY: "auto"}}>
+                  {availableSkills.map(skill => (
+                    <div
+                      key={skill.id}
+                      className={`skill-card ${allowedTools.includes(skill.id) ? "active" : ""}`}
+                      onClick={() => {
+                        setAllowedTools(prev =>
+                          prev.includes(skill.id)
+                            ? prev.filter(t => t !== skill.id)
+                            : [...prev, skill.id]
+                        );
+                      }}
+                      style={{padding: "0.75rem"}}
+                    >
+                      <div style={{display: "flex", alignItems: "center"}}>
+                        {SKILL_ICONS[skill.id] && (
+                          <img
+                            src={SKILL_ICONS[skill.id]}
+                            alt=""
+                            style={{width: "16px", height: "16px", objectFit: "contain", borderRadius: "3px", backgroundColor: "white", padding: "1px", marginRight: "6px"}}
+                          />
+                        )}
+                        <div className="skill-name" style={{fontSize: "0.85rem"}}>{skill.name}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(15)}>Next</button>
+              <button className="secondary" onClick={() => setStep(11)}>Back</button>
             </div>
           </div>
         );
@@ -2191,8 +2274,8 @@ Managed by ClawSetup.`,
             )}
 
             <div className="button-group">
-              <button className="primary" onClick={() => setStep(14)}>Continue</button>
-              <button className="secondary" onClick={() => setStep(12)}>Back</button>
+              <button className="primary" onClick={() => setStep(11)}>Continue</button>
+              <button className="secondary" onClick={() => setStep(10.5)}>Back</button>
             </div>
           </div>
         );
@@ -2244,12 +2327,10 @@ Managed by ClawSetup.`,
       case 15:
         return (
           <div className="step-view">
-            <h2>Business Functions & Multi-Agent</h2>
-            <p className="step-description">Add specialized business functions with pre-configured sub-agents, or set up custom multi-agent configurations.</p>
+            <h2>Build your AI powered business</h2>
+            <p className="step-description">Select specialized business functions to add pre-configured sub-agents to your setup.</p>
 
             <div style={{marginBottom: "1.5rem"}}>
-              <label style={{fontWeight: 600, marginBottom: "0.75rem", display: "block"}}>Business Functions</label>
-              <p className="input-hint" style={{marginBottom: "0.75rem"}}>Select functions to add pre-configured sub-agents to your setup.</p>
               <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem"}}>
                 {Object.values(BUSINESS_FUNCTION_PRESETS).map(bf => (
                   <div
@@ -2278,23 +2359,31 @@ Managed by ClawSetup.`,
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-
-            <div style={{borderTop: "1px solid var(--border)", paddingTop: "1.5rem"}}>
-              <label style={{fontWeight: 600, marginBottom: "0.5rem", display: "block"}}>Custom Multi-Agent</label>
-              <div className="mode-card-container">
-                <div className={`mode-card ${!enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(false)}>
-                  <h3>Single Agent</h3>
-                  <p>Use one agent with the configured settings.</p>
+                {/* Custom team of agents card */}
+                <div
+                  className={`mode-card ${selectedBusinessFunctions.includes("custom-team") ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedBusinessFunctions(prev =>
+                      prev.includes("custom-team") ? prev.filter(id => id !== "custom-team") : [...prev, "custom-team"]
+                    );
+                  }}
+                  style={{
+                    padding: "1rem",
+                    borderRadius: "10px",
+                    border: selectedBusinessFunctions.includes("custom-team") ? "2px solid var(--primary)" : "1px solid var(--border)",
+                    backgroundColor: selectedBusinessFunctions.includes("custom-team") ? "rgba(0, 122, 255, 0.08)" : "var(--bg-card)",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem"}}>
+                    <span style={{fontSize: "1.2rem"}}>🛠️</span>
+                    <span style={{fontWeight: 600, fontSize: "0.9rem"}}>Custom team of agents</span>
+                  </div>
+                  <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>Manually configure a custom multi-agent team.</div>
                 </div>
-                <div className={`mode-card ${enableMultiAgent ? "active" : ""}`} onClick={() => setEnableMultiAgent(true)}>
-                  <h3>Custom Multi-Agent</h3>
-                  <p>Manually configure multiple agents (2-5).</p>
-                </div>
               </div>
 
-              {enableMultiAgent && (
+              {selectedBusinessFunctions.includes("custom-team") && (
                 <div className="form-group" style={{marginTop: "1rem"}}>
                   <label>Number of Custom Agents</label>
                   <input
@@ -2314,12 +2403,18 @@ Managed by ClawSetup.`,
 
             <div className="button-group" style={{marginTop: "1.5rem"}}>
               <button className="primary" onClick={() => {
-                // Apply business function presets
-                if (selectedBusinessFunctions.length > 0) {
-                  const allAgents: typeof agentConfigs = [];
-                  const allCronJobs: CronJobConfig[] = [];
+                // Use local variables to track state changes within the click handler
+                // to avoid React batching issues with reading stale state
+                let willEnableMultiAgent = enableMultiAgent;
+                let nextAgentConfigs = [...agentConfigs];
+                const allCronJobs: CronJobConfig[] = [...cronJobs];
 
-                  for (const bfId of selectedBusinessFunctions) {
+                // Apply business function presets (excluding custom-team)
+                const presetFunctions = selectedBusinessFunctions.filter(id => id !== "custom-team");
+                if (presetFunctions.length > 0) {
+                  const allAgents: AgentConfigData[] = [];
+
+                  for (const bfId of presetFunctions) {
                     const bf = BUSINESS_FUNCTION_PRESETS[bfId];
                     if (!bf) continue;
 
@@ -2336,6 +2431,10 @@ Managed by ClawSetup.`,
                         identityMd: sub.identityMd,
                         userMd: "",
                         soulMd: sub.soulMd,
+                        toolsMd: sub.toolsMd || "",
+                        agentsMd: sub.agentsMd || "",
+                        allowedTools: [],
+                        cronJobs: [],
                       });
                     }
 
@@ -2344,19 +2443,19 @@ Managed by ClawSetup.`,
                   }
 
                   if (allAgents.length > 0) {
-                    setEnableMultiAgent(true);
-                    setAgentConfigs(prev => [...prev, ...allAgents]);
-                    setNumAgents(prev => prev + allAgents.length);
+                    willEnableMultiAgent = true;
+                    nextAgentConfigs = [...nextAgentConfigs, ...allAgents];
                   }
-                  setCronJobs(allCronJobs);
                 }
 
-                if (enableMultiAgent) {
-                  if (agentConfigs.length === 0 || agentConfigs.length !== numAgents) {
-                    const configs = Array.from({ length: numAgents }, (_, i) => {
-                      const existingConfig = agentConfigs[i];
-                      if (existingConfig && existingConfig.id) return existingConfig;
-                      return {
+                // Handle custom-team selection
+                if (selectedBusinessFunctions.includes("custom-team")) {
+                  willEnableMultiAgent = true;
+                  // Add custom agents if needed
+                  const existingCount = nextAgentConfigs.length;
+                  if (existingCount < numAgents) {
+                    for (let i = existingCount; i < numAgents; i++) {
+                      nextAgentConfigs.push({
                         id: `agent-${i + 1}`,
                         name: `Agent ${i + 1}`,
                         model: model,
@@ -2366,33 +2465,53 @@ Managed by ClawSetup.`,
                         emoji: agentEmoji,
                         identityMd: "",
                         userMd: "",
-                        soulMd: ""
-                      };
-                    });
-                    setAgentConfigs(configs);
+                        soulMd: "",
+                        toolsMd: "",
+                        agentsMd: "",
+                        allowedTools: [],
+                        cronJobs: [],
+                      });
+                    }
                   }
+                }
+
+                // Apply state updates
+                setCronJobs(allCronJobs);
+                setEnableMultiAgent(willEnableMultiAgent);
+                setAgentConfigs(nextAgentConfigs);
+                setNumAgents(nextAgentConfigs.length || numAgents);
+
+                if (willEnableMultiAgent && nextAgentConfigs.length > 0) {
                   setCurrentAgentConfigIdx(0);
                   setActiveWorkspaceTab("identity");
                   setStep(15.5);
                 } else {
-                  setStep(16);
+                  setStep(15.7);
                 }
               }} disabled={loading}>
-                {enableMultiAgent || selectedBusinessFunctions.length > 0 ? "Configure Agents" : "Next"}
+                {selectedBusinessFunctions.length > 0 ? "Configure Agents" : "Next"}
               </button>
-              <button className="secondary" onClick={() => setStep(14)} disabled={loading}>Back</button>
+              <button className="secondary" onClick={() => setStep(isPresetAgent ? 10.5 : 11.1)} disabled={loading}>Back</button>
             </div>
           </div>
         );
-      case 15.5:
+      case 15.5: {
 
         // Agent Configuration Loop
         if (!enableMultiAgent || currentAgentConfigIdx >= agentConfigs.length) {
-          setStep(16);
+          setStep(15.7);
           return null;
         }
         const currentAgent = agentConfigs[currentAgentConfigIdx];
         const currentAgentProvider = currentAgent.model.split('/')[0];
+
+        // Core tools for allowed tools selection
+        const coreTools = [
+          {id: "filesystem", name: "File System"},
+          {id: "terminal", name: "Terminal"},
+          {id: "browser", name: "Browser"},
+          {id: "network", name: "Network"}
+        ];
 
         return (
           <div className="step-view">
@@ -2421,7 +2540,7 @@ Managed by ClawSetup.`,
               <label>Agent Emoji</label>
               <div className="emoji-grid" style={{display: "flex", gap: "0.5rem", flexWrap: "wrap"}}>
                 {EMOJI_OPTIONS.map(e => (
-                  <button 
+                  <button
                     key={e}
                     className={`emoji-btn`}
                     onClick={() => {
@@ -2433,9 +2552,9 @@ Managed by ClawSetup.`,
                       setAgentConfigs(updated);
                     }}
                     style={{
-                      fontSize: "1.25rem", 
-                      padding: "0.4rem", 
-                      borderRadius: "8px", 
+                      fontSize: "1.25rem",
+                      padding: "0.4rem",
+                      borderRadius: "8px",
                       border: currentAgent.emoji === e ? "2px solid var(--primary)" : "1px solid var(--border)",
                       background: currentAgent.emoji === e ? "rgba(0, 122, 255, 0.08)" : "var(--bg-card)",
                       cursor: "pointer",
@@ -2485,7 +2604,9 @@ Managed by ClawSetup.`,
             <div className="workspace-tabs">
               {[
                 {id: "identity", label: "IDENTITY.md"},
-                {id: "soul", label: "SOUL.md"}
+                {id: "soul", label: "SOUL.md"},
+                {id: "tools", label: "TOOLS.md"},
+                {id: "agents", label: "AGENTS.md"}
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -2511,7 +2632,7 @@ Managed by ClawSetup.`,
                   placeholder={`# IDENTITY.md\n- **Name:** ${currentAgent.name}\n- **Emoji:** ${currentAgent.emoji}`}
                 />
               )}
-              
+
               {activeWorkspaceTab === "soul" && (
                 <textarea
                   className="markdown-editor"
@@ -2525,11 +2646,39 @@ Managed by ClawSetup.`,
                   placeholder={`# SOUL.md\n## Mission\nServe ${userName}.`}
                 />
               )}
+
+              {activeWorkspaceTab === "tools" && (
+                <textarea
+                  className="markdown-editor"
+                  rows={8}
+                  value={currentAgent.toolsMd}
+                  onChange={e => {
+                    const updated = [...agentConfigs];
+                    updated[currentAgentConfigIdx].toolsMd = e.target.value;
+                    setAgentConfigs(updated);
+                  }}
+                  placeholder={`# TOOLS.md\nDefine tool usage policies for this agent...`}
+                />
+              )}
+
+              {activeWorkspaceTab === "agents" && (
+                <textarea
+                  className="markdown-editor"
+                  rows={8}
+                  value={currentAgent.agentsMd}
+                  onChange={e => {
+                    const updated = [...agentConfigs];
+                    updated[currentAgentConfigIdx].agentsMd = e.target.value;
+                    setAgentConfigs(updated);
+                  }}
+                  placeholder={`# AGENTS.md\nDefine sub-agent routing for this agent...`}
+                />
+              )}
             </div>
 
             <div className="form-group" style={{padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem"}}>
               <label>Primary Model</label>
-              
+
               <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
               <Dropdown
                 value={currentAgentProvider}
@@ -2564,7 +2713,7 @@ Managed by ClawSetup.`,
                   />
                 </div>
               )}
-              
+
               {currentAgentProvider && currentAgentProvider !== provider && !serviceKeys[currentAgentProvider] && !["ollama"].includes(currentAgentProvider) && (
                  <div style={{marginTop: "0.5rem"}}>
                    <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentAgentProvider}</label>
@@ -2578,7 +2727,7 @@ Managed by ClawSetup.`,
                  </div>
               )}
             </div>
-            
+
              <div className="form-group" style={{padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem"}}>
                <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
                  <label>Fallback Model (Optional)</label>
@@ -2594,7 +2743,7 @@ Managed by ClawSetup.`,
                {(() => {
                  const currentFallbackModel = currentAgent.fallbackModels[0] || "";
                  const currentFallbackProvider = currentFallbackModel.split('/')[0];
-                 
+
                  return (
                    <>
                      <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
@@ -2671,18 +2820,18 @@ Managed by ClawSetup.`,
                   >
                     <div style={{display: "flex", alignItems: "center"}}>
                       {SKILL_ICONS[skill.id] && (
-                        <img 
-                          src={SKILL_ICONS[skill.id]} 
-                          alt="" 
+                        <img
+                          src={SKILL_ICONS[skill.id]}
+                          alt=""
                           style={{
-                            width: "16px", 
-                            height: "16px", 
-                            objectFit: "contain", 
-                            borderRadius: "3px", 
-                            backgroundColor: "white", 
-                            padding: "1px", 
+                            width: "16px",
+                            height: "16px",
+                            objectFit: "contain",
+                            borderRadius: "3px",
+                            backgroundColor: "white",
+                            padding: "1px",
                             marginRight: "6px"
-                          }} 
+                          }}
                         />
                       )}
                       <div className="skill-name" style={{fontSize: "0.85rem"}}>{skill.name}</div>
@@ -2692,13 +2841,131 @@ Managed by ClawSetup.`,
               </div>
             </div>
 
+            {/* Allowed Tools */}
+            <div className="form-group" style={{marginTop: "1rem"}}>
+              <label>Allowed Tools</label>
+              <div className="skills-grid" style={{marginTop: "0.5rem"}}>
+                {[...coreTools, ...availableSkills.map(s => ({id: s.id, name: s.name}))].map(tool => (
+                  <div
+                    key={`tool-${tool.id}`}
+                    className={`skill-card ${currentAgent.allowedTools.includes(tool.id) ? "active" : ""}`}
+                    onClick={() => {
+                      const updated = [...agentConfigs];
+                      const tools = updated[currentAgentConfigIdx].allowedTools;
+                      if (tools.includes(tool.id)) {
+                        updated[currentAgentConfigIdx].allowedTools = tools.filter(t => t !== tool.id);
+                      } else {
+                        updated[currentAgentConfigIdx].allowedTools = [...tools, tool.id];
+                      }
+                      setAgentConfigs(updated);
+                    }}
+                    style={{padding: "0.5rem 0.75rem"}}
+                  >
+                    <div className="skill-name" style={{fontSize: "0.85rem"}}>{tool.name}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Cron Jobs */}
+            <div className="form-group" style={{marginTop: "1.5rem"}}>
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <label>Cron Jobs</label>
+                <button className="secondary" style={{padding: "2px 10px", fontSize: "0.75rem", height: "auto"}} onClick={() => {
+                  const updated = [...agentConfigs];
+                  updated[currentAgentConfigIdx].cronJobs = [...updated[currentAgentConfigIdx].cronJobs, {name: "", schedule: "", command: ""}];
+                  setAgentConfigs(updated);
+                }}>+ Add</button>
+              </div>
+              {currentAgent.cronJobs.map((cron, cronIdx) => (
+                <div key={cronIdx} style={{padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "0.5rem"}}>
+                  <div style={{display: "flex", gap: "0.5rem", marginBottom: "0.5rem"}}>
+                    <input
+                      placeholder="Job name"
+                      value={cron.name}
+                      onChange={e => {
+                        const updated = [...agentConfigs];
+                        updated[currentAgentConfigIdx].cronJobs[cronIdx].name = e.target.value;
+                        setAgentConfigs(updated);
+                      }}
+                      style={{flex: 1}}
+                    />
+                    <button className="secondary" style={{padding: "2px 8px", fontSize: "0.75rem", height: "auto", color: "var(--error)"}} onClick={() => {
+                      const updated = [...agentConfigs];
+                      updated[currentAgentConfigIdx].cronJobs = updated[currentAgentConfigIdx].cronJobs.filter((_, i) => i !== cronIdx);
+                      setAgentConfigs(updated);
+                    }}>Remove</button>
+                  </div>
+                  <input
+                    placeholder="Schedule (e.g. 0 9 * * *)"
+                    value={cron.schedule}
+                    onChange={e => {
+                      const updated = [...agentConfigs];
+                      updated[currentAgentConfigIdx].cronJobs[cronIdx].schedule = e.target.value;
+                      setAgentConfigs(updated);
+                    }}
+                    style={{marginBottom: "0.5rem"}}
+                  />
+                  <input
+                    placeholder="Command"
+                    value={cron.command}
+                    onChange={e => {
+                      const updated = [...agentConfigs];
+                      updated[currentAgentConfigIdx].cronJobs[cronIdx].command = e.target.value;
+                      setAgentConfigs(updated);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Add/Remove Agent buttons */}
+            <div style={{display: "flex", gap: "0.5rem", marginTop: "1rem"}}>
+              <button className="secondary" style={{fontSize: "0.8rem"}} onClick={() => {
+                const newAgent: AgentConfigData = {
+                  id: `agent-${agentConfigs.length + 1}`,
+                  name: `Agent ${agentConfigs.length + 1}`,
+                  model: model,
+                  fallbackModels: [],
+                  skills: [],
+                  vibe: "",
+                  emoji: agentEmoji,
+                  identityMd: "",
+                  userMd: "",
+                  soulMd: "",
+                  toolsMd: "",
+                  agentsMd: "",
+                  allowedTools: [],
+                  cronJobs: [],
+                };
+                setAgentConfigs([...agentConfigs, newAgent]);
+                setNumAgents(agentConfigs.length + 1);
+              }}>+ Add Agent</button>
+              {agentConfigs.length > 1 && (
+                <button className="secondary" style={{fontSize: "0.8rem", color: "var(--error)"}} onClick={() => {
+                  const updated = agentConfigs.filter((_, i) => i !== currentAgentConfigIdx);
+                  setAgentConfigs(updated);
+                  setNumAgents(updated.length);
+                  if (currentAgentConfigIdx >= updated.length) {
+                    setCurrentAgentConfigIdx(Math.max(0, updated.length - 1));
+                  }
+                }}>Remove This Agent</button>
+              )}
+            </div>
+
             <div className="button-group" style={{marginTop: "1.5rem"}}>
               <button className="primary" onClick={() => {
                 if (currentAgentConfigIdx < agentConfigs.length - 1) {
                   setCurrentAgentConfigIdx(currentAgentConfigIdx + 1);
                   setActiveWorkspaceTab("identity");
                 } else {
-                  setStep(16);
+                  // Auto-update main agent's AGENTS.md with routing config
+                  if (agentConfigs.length > 0) {
+                    const routingLines = agentConfigs.map(a => `- **${a.name}** (${a.id}): ${a.skills.join(", ") || "general"}`).join("\n");
+                    const agentsMdContent = `# AGENTS.md - Agent Routing\n\n## Available Sub-Agents\n${routingLines}\n`;
+                    setAgentsMd(agentsMdContent);
+                  }
+                  setStep(15.7);
                 }
               }} disabled={loading}>
                 {currentAgentConfigIdx < agentConfigs.length - 1 ? "Next Agent" : "Next"}
@@ -2714,7 +2981,170 @@ Managed by ClawSetup.`,
             </div>
           </div>
         );
+      }
 
+
+case 15.7:
+        return (
+          <div className="step-view">
+            <h2>Extra Settings</h2>
+            <p className="step-description">Configure advanced gateway, runtime, security, and session settings.</p>
+
+            {/* Gateway Settings */}
+            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+              <button
+                className="accordion-header"
+                onClick={() => setExtraSettingsOpen(prev => ({...prev, gateway: !prev.gateway}))}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: extraSettingsOpen.gateway ? "12px 12px 0 0" : "12px",
+                  cursor: "pointer", fontWeight: 600, fontSize: "0.9rem"
+                }}
+              >
+                <span>Gateway Settings</span>
+                <span style={{transform: extraSettingsOpen.gateway ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+              </button>
+              {extraSettingsOpen.gateway && (
+                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                  <div className="form-group">
+                    <label>Port</label>
+                    <input type="number" value={gatewayPort} onChange={(e) => setGatewayPort(parseInt(e.target.value))} />
+                  </div>
+                  <div className="form-group" style={{marginTop: "1rem"}}>
+                    <label>Bind Address</label>
+                    <Dropdown value={gatewayBind} onChange={setGatewayBind} options={[
+                      { value: "loopback", label: "Loopback (127.0.0.1)", description: "Only accessible from this machine" },
+                      { value: "all", label: "All Interfaces (0.0.0.0)", description: "Accessible from local network" }
+                    ]} />
+                  </div>
+                  <div className="form-group" style={{marginTop: "1rem"}}>
+                    <label>Auth Mode</label>
+                    <Dropdown value={gatewayAuthMode} onChange={setGatewayAuthMode} options={[
+                      { value: "token", label: "Token (Secure)", description: "Requires authentication token" },
+                      { value: "none", label: "None (Insecure)", description: "No authentication required" }
+                    ]} />
+                  </div>
+                  <div className="form-group" style={{marginTop: "1rem"}}>
+                    <label>Tailscale</label>
+                    <Dropdown value={tailscaleMode} onChange={setTailscaleMode} options={[
+                      { value: "off", label: "Disabled", description: "Standard networking" },
+                      { value: "on", label: "Enabled", description: "Expose securely via Tailscale" }
+                    ]} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Runtime Environment */}
+            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+              <button
+                className="accordion-header"
+                onClick={() => setExtraSettingsOpen(prev => ({...prev, runtime: !prev.runtime}))}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: extraSettingsOpen.runtime ? "12px 12px 0 0" : "12px",
+                  cursor: "pointer", fontWeight: 600, fontSize: "0.9rem"
+                }}
+              >
+                <span>Runtime Environment</span>
+                <span style={{transform: extraSettingsOpen.runtime ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+              </button>
+              {extraSettingsOpen.runtime && (
+                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                  <div className="form-group">
+                    <label>Node Package Manager</label>
+                    <Dropdown value={nodeManager} onChange={setNodeManager} options={[
+                      { value: "npm", label: "npm" },
+                      { value: "pnpm", label: "pnpm" },
+                      { value: "bun", label: "bun" }
+                    ]} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Security (Sandbox) */}
+            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+              <button
+                className="accordion-header"
+                onClick={() => setExtraSettingsOpen(prev => ({...prev, security: !prev.security}))}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: extraSettingsOpen.security ? "12px 12px 0 0" : "12px",
+                  cursor: "pointer", fontWeight: 600, fontSize: "0.9rem"
+                }}
+              >
+                <span>Security (Sandbox)</span>
+                <span style={{transform: extraSettingsOpen.security ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+              </button>
+              {extraSettingsOpen.security && (
+                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                  <div className="form-group">
+                    <label>Sandbox Mode</label>
+                    <Dropdown value={sandboxMode} onChange={setSandboxMode} options={[
+                      { value: "full", label: "Full Sandbox", description: "REQUIRES DOCKER! Select only if Docker is installed." },
+                      { value: "partial", label: "Partial Sandbox", description: "Standard isolation." },
+                      { value: "none", label: "No Sandbox", description: "Unrestricted access." }
+                    ]} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Session Management */}
+            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+              <button
+                className="accordion-header"
+                onClick={() => setExtraSettingsOpen(prev => ({...prev, session: !prev.session}))}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: extraSettingsOpen.session ? "12px 12px 0 0" : "12px",
+                  cursor: "pointer", fontWeight: 600, fontSize: "0.9rem"
+                }}
+              >
+                <span>Session Management</span>
+                <span style={{transform: extraSettingsOpen.session ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+              </button>
+              {extraSettingsOpen.session && (
+                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                  <div className="mode-card-container" style={{gridTemplateColumns: "1fr 1fr"}}>
+                    {[
+                      {mode: "1h", label: "Hourly", desc: "Reset every hour"},
+                      {mode: "4h", label: "4 Hours", desc: "Reset every 4 hours"},
+                      {mode: "24h", label: "Daily", desc: "Reset once per day"},
+                      {mode: "idle", label: "Idle Timeout", desc: "Reset after inactivity"},
+                      {mode: "never", label: "Never", desc: "Manual reset only"}
+                    ].map(item => (
+                      <div
+                        key={item.mode}
+                        className={`mode-card ${heartbeatMode === item.mode ? "active" : ""}`}
+                        onClick={() => setHeartbeatMode(item.mode)}
+                      >
+                        <h3>{item.label}</h3>
+                        <p>{item.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {heartbeatMode === "idle" && (
+                    <div className="form-group" style={{marginTop: "1rem"}}>
+                      <label>Idle Timeout (minutes)</label>
+                      <input type="number" value={idleTimeoutMs / 60000} onChange={e => setIdleTimeoutMs(Number(e.target.value) * 60000)} min="1" max="1440" />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="button-group">
+              <button className="primary" onClick={() => setStep(16)}>Next</button>
+              <button className="secondary" onClick={() => setStep(enableMultiAgent ? 15.5 : 15)}>Back</button>
+            </div>
+          </div>
+        );
 
 case 16:
         return (
@@ -2765,7 +3195,7 @@ case 16:
                   Next
                 </button>
               )}
-              <button className="secondary" onClick={() => setStep(mode === "advanced" ? (enableMultiAgent ? 15.5 : 15) : 9)} disabled={loading}>Back</button>
+              <button className="secondary" onClick={() => setStep(mode === "advanced" ? 15.7 : 9)} disabled={loading}>Back</button>
             </div>
           </div>
         );
@@ -2773,7 +3203,7 @@ case 16:
       case 10.5:
         return (
           <div className="step-view">
-            <h2>Customize Workspace</h2>
+            <h2>Customize {agentName ? `${agentName}'s` : "your agent's"} personality</h2>
             <p className="step-description">Edit your agent's identity, personality, and mission.</p>
 
             <div className="form-group" style={{marginBottom: "1.5rem"}}>
@@ -2810,7 +3240,9 @@ case 16:
               {[
                 {id: "identity", label: "IDENTITY.md"},
                 {id: "user", label: "USER.md"},
-                {id: "soul", label: "SOUL.md"}
+                {id: "soul", label: "SOUL.md"},
+                {id: "tools", label: "TOOLS.md"},
+                {id: "agents", label: "AGENTS.md"}
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -2850,6 +3282,24 @@ case 16:
                   placeholder={`# SOUL.md\n## Mission\nServe ${userName}.\n\nAdd your agent's mission statement and guiding principles...`}
                 />
               )}
+              {activeWorkspaceTab === "tools" && (
+                <textarea
+                  className="markdown-editor"
+                  rows={12}
+                  value={toolsMd}
+                  onChange={e => setToolsMd(e.target.value)}
+                  placeholder={`# TOOLS.md\nDefine tool usage policies and instructions for your agent...`}
+                />
+              )}
+              {activeWorkspaceTab === "agents" && (
+                <textarea
+                  className="markdown-editor"
+                  rows={12}
+                  value={agentsMd}
+                  onChange={e => setAgentsMd(e.target.value)}
+                  placeholder={`# AGENTS.md\nDefine agent routing and sub-agent configuration...`}
+                />
+              )}
             </div>
 
             <p className="input-hint" style={{marginTop: "1rem"}}>
@@ -2865,10 +3315,10 @@ case 16:
               >
                 {savingWorkspace ? "Saving..." : "💾 Save Changes"}
               </button>
-              <button className="primary" onClick={() => setStep(11)} style={{flex: 1}}>
+              <button className="primary" onClick={() => setStep(isPresetAgent ? 15 : 13)} style={{flex: 1}}>
                 Next
               </button>
-              <button className="secondary" onClick={() => setStep(10)} style={{flex: "0 0 auto"}}>Back</button>
+              <button className="secondary" onClick={() => setStep(9)} style={{flex: "0 0 auto"}}>Back</button>
             </div>
           </div>
         );
@@ -3085,7 +3535,7 @@ case 16:
                     setMode("advanced");
                     setPairingStatus("");
                     setSkipBasicConfig(true); setMaintCompleted(true);
-                    setStep(7);
+                    setStep(10.5);
                   } catch (e) {
                     setVerifyingLicense(false);
                     setLicenseError(String(e));

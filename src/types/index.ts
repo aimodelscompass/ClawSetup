@@ -46,6 +46,10 @@ export interface AgentConfigData {
   identityMd: string;
   userMd: string;
   soulMd: string;
+  toolsMd: string;
+  agentsMd: string;
+  allowedTools: string[];
+  cronJobs: CronJobConfig[];
   persona?: string;
 }
 
@@ -103,7 +107,8 @@ export type BusinessFunctionId =
   | "financial-analyst"
   | "social-media"
   | "crm"
-  | "customer-support";
+  | "customer-support"
+  | "custom-team";
 
 export interface SubAgentPreset {
   id: string;

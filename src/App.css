@@ -714,3 +714,19 @@ button:disabled {
 ::-webkit-scrollbar-thumb:hover {
   background: #AEAEB2;
 }
+
+/* Accordion Sections */
+.accordion-section {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.accordion-header {
+  font-family: inherit;
+  color: var(--text-main);
+  transition: background-color 0.2s;
+}
+
+.accordion-header:hover {
+  background-color: var(--primary-light) !important;
+}
