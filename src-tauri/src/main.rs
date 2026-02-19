@@ -1089,18 +1089,26 @@ fn run_security_audit_fix() -> Result<String, String> {
 
 #[command]
 fn check_prerequisites() -> PrereqCheck {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, shell_command routes through WSL, so check WSL2 first
+        let wsl2_ok = check_wsl2_installed();
+        if !wsl2_ok {
+            // WSL2 not installed — can't check node or openclaw yet
+            return PrereqCheck {
+                node_installed: false,
+                docker_running: true,
+                openclaw_installed: false,
+            };
+        }
+    }
+
     let node = shell_command("node -v").is_ok();
     let openclaw = shell_command("openclaw --version").is_ok();
-    
-    #[cfg(target_os = "windows")]
-    let _wsl2_installed = check_wsl2_installed();
-    
-    #[cfg(not(target_os = "windows"))]
-    let _wsl2_installed = true;
 
     PrereqCheck {
         node_installed: node,
-        docker_running: true, 
+        docker_running: true,
         openclaw_installed: openclaw,
     }
 }
@@ -1110,9 +1118,7 @@ fn install_openclaw() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         ensure_wsl2_installed()?;
-        // Install Node.js in WSL2 using the official installer
-        shell_command("wsl -- bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'")?;
-        shell_command("wsl -- apt-get install -y nodejs")?;
+        // Node.js should already be installed by install_local_nodejs()
         // Install OpenClaw in WSL2 using npm
         shell_command("wsl -- npm install -g openclaw")?;
         shell_command("wsl -- openclaw --version")?;
@@ -1857,19 +1863,24 @@ fn ensure_wsl2_installed() -> Result<(), String> {
         return Ok(());
     }
     
-    // Install WSL2 using PowerShell
-    let _install_wsl = "powershell -Command \"wsl --install --distribution Ubuntu\"";
+    // Install WSL2 using PowerShell (requires admin privileges)
     let output = Command::new("powershell")
         .args(["-Command", "wsl --install --distribution Ubuntu"])
         .output()
         .map_err(|e| format!("Failed to execute WSL2 installation: {}", e))?;
-    
+
     if !output.status.success() {
-        return Err("WSL2 installation failed. Please ensure you have administrator privileges and virtualization is enabled in BIOS.".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("WSL2 installation failed. Please ensure you have administrator privileges and virtualization is enabled in BIOS. Error: {}", stderr));
     }
-    
-    // Wait a moment for WSL2 to be fully installed
-    thread::sleep(Duration::from_secs(5));
+
+    // Wait for WSL2 setup to complete
+    thread::sleep(Duration::from_secs(10));
+
+    // Verify WSL2 is now available
+    if !check_wsl2_installed() {
+        return Err("WSL2 was installed but requires a system restart. Please restart your computer and run this setup again.".to_string());
+    }
     
     Ok(())
 }
@@ -2279,23 +2290,35 @@ fn verify_license(key: String) -> Result<bool, String> {
 
 #[command]
 async fn install_local_nodejs() -> Result<String, String> {
-    // 1. Try brew (macOS standard)
-    if shell_command("brew --version").is_ok() {
-        return shell_command("brew install node");
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows: install WSL2 first, then Node.js inside WSL2
+        ensure_wsl2_installed()?;
+        // Install Node.js in WSL2 using NodeSource repository
+        shell_command("curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -")
+            .map_err(|e| format!("Failed to add NodeSource repository: {}", e))?;
+        shell_command("sudo apt-get install -y nodejs")
+            .map_err(|e| format!("Failed to install Node.js in WSL2: {}", e))?;
+        return Ok("Node.js installed successfully in WSL2.".to_string());
     }
 
-    // 2. Try nvm (via curl) - Fallback for macOS without brew or Linux
-    // Install nvm if not present
-    let install_nvm_cmd = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash";
-    shell_command(install_nvm_cmd).map_err(|e| format!("Failed to install nvm: {}", e))?;
-    
-    // Install node via nvm (sourcing nvm.sh in the same shell session)
-    // We install the latest stable version ('node') and set it as default
-    let install_node_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
-        [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
-        nvm install node && nvm use node && nvm alias default node";
-        
-    shell_command(install_node_cmd).map_err(|e| format!("Failed to install Node.js via nvm: {}", e))
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 1. Try brew (macOS standard)
+        if shell_command("brew --version").is_ok() {
+            return shell_command("brew install node");
+        }
+
+        // 2. Try nvm (via curl) - Fallback for macOS without brew or Linux
+        let install_nvm_cmd = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash";
+        shell_command(install_nvm_cmd).map_err(|e| format!("Failed to install nvm: {}", e))?;
+
+        let install_node_cmd = "export NVM_DIR=\"$HOME/.nvm\"; \
+            [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"; \
+            nvm install node && nvm use node && nvm alias default node";
+
+        shell_command(install_node_cmd).map_err(|e| format!("Failed to install Node.js via nvm: {}", e))
+    }
 }
 
 fn main() {
