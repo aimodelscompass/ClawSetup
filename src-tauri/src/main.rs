@@ -1119,8 +1119,8 @@ fn install_openclaw() -> Result<String, String> {
     {
         ensure_wsl2_installed()?;
         // Node.js should already be installed by install_local_nodejs()
-        // shell_command() already routes through WSL on Windows, so just use npm directly
-        shell_command("npm install -g openclaw")?;
+        // Global npm install needs root for /usr/lib/node_modules
+        wsl_root_command("npm install -g openclaw")?;
         shell_command("openclaw --version")?;
         Ok("OpenClaw installed successfully in WSL2.".to_string())
     }
@@ -1891,7 +1891,26 @@ fn ensure_wsl2_installed() -> Result<(), String> {
     if !check_wsl2_installed() {
         return Err("WSL2 was installed but may require a system restart. Please restart your computer and run this setup again.".to_string());
     }
-    
+
+    // Configure Ubuntu with a default user non-interactively.
+    // Without this, Ubuntu prompts for username/password on first launch.
+    // First set root as default to avoid the interactive prompt:
+    let _ = Command::new("powershell")
+        .args(["-Command", "ubuntu config --default-user root"])
+        .output();
+
+    // Create a non-root user 'openclaw' with a password, for general use
+    let _ = Command::new("wsl")
+        .args(["--user", "root", "--", "/bin/bash", "-c",
+            "id openclaw >/dev/null 2>&1 || (useradd -m -s /bin/bash openclaw && echo 'openclaw:openclaw' | chpasswd && usermod -aG sudo openclaw)"
+        ])
+        .output();
+
+    // Set 'openclaw' as the default WSL user
+    let _ = Command::new("powershell")
+        .args(["-Command", "ubuntu config --default-user openclaw"])
+        .output();
+
     Ok(())
 }
 
