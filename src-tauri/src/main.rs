@@ -296,18 +296,35 @@ async fn test_ssh_connection(remote: RemoteInfo) -> Result<String, String> {
 
 #[command]
 fn read_workspace_files() -> Result<serde_json::Value, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let workspace = home.join(".openclaw").join("workspace");
+    #[cfg(target_os = "windows")]
+    {
+        let workspace = wsl_home_dir()?.trim().to_string() + "/.openclaw/workspace";
+        let identity = wsl_read_file(&format!("{}/IDENTITY.md", workspace)).unwrap_or_default();
+        let user = wsl_read_file(&format!("{}/USER.md", workspace)).unwrap_or_default();
+        let soul = wsl_read_file(&format!("{}/SOUL.md", workspace)).unwrap_or_default();
 
-    let identity = fs::read_to_string(workspace.join("IDENTITY.md")).unwrap_or_default();
-    let user = fs::read_to_string(workspace.join("USER.md")).unwrap_or_default();
-    let soul = fs::read_to_string(workspace.join("SOUL.md")).unwrap_or_default();
+        Ok(serde_json::json!({
+            "identity": identity,
+            "user": user,
+            "soul": soul
+        }))
+    }
 
-    Ok(serde_json::json!({
-        "identity": identity,
-        "user": user,
-        "soul": soul
-    }))
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = dirs::home_dir().ok_or("Could not find home directory")?;
+        let workspace = home.join(".openclaw").join("workspace");
+
+        let identity = fs::read_to_string(workspace.join("IDENTITY.md")).unwrap_or_default();
+        let user = fs::read_to_string(workspace.join("USER.md")).unwrap_or_default();
+        let soul = fs::read_to_string(workspace.join("SOUL.md")).unwrap_or_default();
+
+        Ok(serde_json::json!({
+            "identity": identity,
+            "user": user,
+            "soul": soul
+        }))
+    }
 }
 
 #[command]
@@ -317,34 +334,69 @@ fn save_workspace_files(
     user: String,
     soul: String
 ) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    #[cfg(target_os = "windows")]
+    {
+        let home = wsl_home_dir()?.trim().to_string();
+        let workspace = if let Some(id) = agent_id {
+            format!("{}/.openclaw/agents/{}/workspace", home, id)
+        } else {
+            format!("{}/.openclaw/workspace", home)
+        };
 
-    let workspace = if let Some(id) = agent_id {
-        // Save to agent-specific workspace
-        home.join(".openclaw").join("agents").join(id).join("workspace")
-    } else {
-        // Save to global workspace
-        home.join(".openclaw").join("workspace")
-    };
+        wsl_mkdir_p(&workspace)?;
 
-    fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+        wsl_write_file(&format!("{}/IDENTITY.md", workspace), &identity)?;
+        wsl_write_file(&format!("{}/USER.md", workspace), &user)?;
+        wsl_write_file(&format!("{}/SOUL.md", workspace), &soul)?;
 
-    fs::write(workspace.join("IDENTITY.md"), identity).map_err(|e| e.to_string())?;
-    fs::write(workspace.join("USER.md"), user).map_err(|e| e.to_string())?;
-    fs::write(workspace.join("SOUL.md"), soul).map_err(|e| e.to_string())?;
+        Ok("Workspace files saved successfully".to_string())
+    }
 
-    Ok("Workspace files saved successfully".to_string())
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = dirs::home_dir().ok_or("Could not find home directory")?;
+
+        let workspace = if let Some(id) = agent_id {
+            // Save to agent-specific workspace
+            home.join(".openclaw").join("agents").join(id).join("workspace")
+        } else {
+            // Save to global workspace
+            home.join(".openclaw").join("workspace")
+        };
+
+        fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+
+        fs::write(workspace.join("IDENTITY.md"), identity).map_err(|e| e.to_string())?;
+        fs::write(workspace.join("USER.md"), user).map_err(|e| e.to_string())?;
+        fs::write(workspace.join("SOUL.md"), soul).map_err(|e| e.to_string())?;
+
+        Ok("Workspace files saved successfully".to_string())
+    }
 }
 
 #[command]
 fn create_custom_skill(name: String, content: String) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let skill_dir = home.join(".openclaw").join("workspace").join("skills").join(&name);
+    #[cfg(target_os = "windows")]
+    {
+        let home = wsl_home_dir()?.trim().to_string();
+        let skill_dir = format!("{}/.openclaw/workspace/skills/{}", home, name);
 
-    fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
-    fs::write(skill_dir.join("SKILL.md"), content).map_err(|e| e.to_string())?;
+        wsl_mkdir_p(&skill_dir)?;
+        wsl_write_file(&format!("{}/SKILL.md", skill_dir), &content)?;
 
-    Ok(format!("Custom skill '{}' created successfully", name))
+        Ok(format!("Custom skill '{}' created successfully", name))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = dirs::home_dir().ok_or("Could not find home directory")?;
+        let skill_dir = home.join(".openclaw").join("workspace").join("skills").join(&name);
+
+        fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
+        fs::write(skill_dir.join("SKILL.md"), content).map_err(|e| e.to_string())?;
+
+        Ok(format!("Custom skill '{}' created successfully", name))
+    }
 }
 
 #[command]
@@ -1777,17 +1829,35 @@ fn get_dashboard_url(is_remote: bool, remote: Option<RemoteInfo>) -> Result<Stri
             .ok_or("Could not find gateway token in remote config")?
             .to_string()
     } else {
-        let home = dirs::home_dir().ok_or("Could not find home directory")?;
-        let config_path = home.join(".openclaw").join("openclaw.json");
-        let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-        let json: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "windows")]
+        {
+            let home = wsl_home_dir()?.trim().to_string();
+            let config_path = format!("{}/.openclaw/openclaw.json", home);
+            let config_str = wsl_read_file(&config_path)?;
+            let json: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
 
-        json.get("gateway")
-            .and_then(|g| g.get("auth"))
-            .and_then(|a| a.get("token"))
-            .and_then(|t| t.as_str())
-            .ok_or("Could not find gateway token in config")?
-            .to_string()
+            json.get("gateway")
+                .and_then(|g| g.get("auth"))
+                .and_then(|a| a.get("token"))
+                .and_then(|t| t.as_str())
+                .ok_or("Could not find gateway token in config")?
+                .to_string()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            let config_path = home.join(".openclaw").join("openclaw.json");
+            let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+            let json: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+
+            json.get("gateway")
+                .and_then(|g| g.get("auth"))
+                .and_then(|a| a.get("token"))
+                .and_then(|t| t.as_str())
+                .ok_or("Could not find gateway token in config")?
+                .to_string()
+        }
     };
 
     Ok(format!("http://127.0.0.1:18789/?token={}", token))
