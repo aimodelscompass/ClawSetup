@@ -436,6 +436,8 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     // Skip force install if we want to preserve state
     if config.preserve_state != Some(true) {
         let _ = execute_ssh(&sess, &format!("{}openclaw gateway stop || true", nvm_prefix));
+        // Remove existing config so install --force generates a fresh one
+        let _ = execute_ssh(&sess, &format!("{}rm -f {}/openclaw.json || true", nvm_prefix, openclaw_root));
         let _ = execute_ssh(&sess, &format!("{}openclaw gateway install --force", nvm_prefix));
         // Stop gateway immediately after install to prevent crash-loop
         // (install enables+starts the systemd service, but config lacks gateway.mode=local yet)
@@ -444,8 +446,8 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
 
     execute_ssh(&sess, &format!("mkdir -p {} && mkdir -p {}", workspace, agents_dir))?;
 
-    // Preserve existing gateway token when reconfiguring to avoid device token mismatch
-    let gateway_token: String = if config.preserve_state == Some(true) {
+    // Always preserve existing/scaffolded gateway token to avoid device token mismatch
+    let gateway_token: String = {
         let read_token_result = execute_ssh(&sess, &format!(
             "cat {}/openclaw.json 2>/dev/null || echo '{{}}'", openclaw_root
         ));
@@ -478,12 +480,6 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
                 .map(char::from)
                 .collect()
         }
-    } else {
-        rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(32)
-            .map(char::from)
-            .collect()
     };
 
     let profile_name = format!("{}:default", config.provider);
@@ -1192,6 +1188,8 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     // Run gateway install --force FIRST to scaffold, ONLY if not preserving state
     if config.preserve_state != Some(true) {
         let _ = shell_command("openclaw gateway stop");
+        // Remove existing config so install --force generates a fresh one
+        let _ = shell_command("rm -f ~/.openclaw/openclaw.json || true");
         let _ = shell_command("openclaw gateway install --force");
     }
 
@@ -1202,8 +1200,8 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     mkdir_p_fn(&workspace)?;
     mkdir_p_fn(&agents_dir)?;
 
-    // Preserve existing gateway token when reconfiguring to avoid device token mismatch
-    let gateway_token: String = if config.preserve_state == Some(true) {
+    // Always preserve existing/scaffolded gateway token to avoid device token mismatch
+    let gateway_token: String = {
         let existing_config_path = format!("{}/openclaw.json", openclaw_root);
         let contents = read_file_fn(&existing_config_path);
         if !contents.is_empty() {
@@ -1235,12 +1233,6 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
                 .map(char::from)
                 .collect()
         }
-    } else {
-        rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(32)
-            .map(char::from)
-            .collect()
     };
 
     let profile_name = format!("{}:default", config.provider);
@@ -2070,7 +2062,12 @@ fn wsl_list_dirs(base_path: &str) -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 fn wsl_remove_dir(path: &str) -> Result<(), String> {
-    shell_command(&format!("rm -rf \"{}\"", path))?;
+    let cmd = if path.starts_with("~/") {
+        format!("rm -rf \"$HOME/{}\"", &path[2..])
+    } else {
+        format!("rm -rf \"{}\"", path)
+    };
+    shell_command(&cmd)?;
     Ok(())
 }
 
@@ -2820,10 +2817,14 @@ mod tests {
 
     #[test]
     fn test_wsl_remove_dir_command_structure() {
-        // wsl_remove_dir should use rm -rf with the path
+        // wsl_remove_dir should use rm -rf with the path and expand ~/ to $HOME/
         let path = "~/.openclaw";
-        let cmd = format!("rm -rf \"{}\"", path);
+        let cmd = if path.starts_with("~/") {
+            format!("rm -rf \"$HOME/{}\"", &path[2..])
+        } else {
+            format!("rm -rf \"{}\"", path)
+        };
         assert!(cmd.contains("rm -rf"));
-        assert!(cmd.contains(path));
+        assert!(cmd.contains("$HOME/.openclaw"));
     }
 }
