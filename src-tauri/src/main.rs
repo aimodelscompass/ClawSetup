@@ -512,30 +512,25 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
 
     // Always preserve existing/scaffolded gateway token to avoid device token mismatch
     let gateway_token: String = {
-        let cli_token = execute_ssh(&sess, &format!("{}openclaw config get gateway.auth.token", nvm_prefix)).unwrap_or_default().trim().trim_matches('"').to_string();
-        if !cli_token.is_empty() && cli_token != "null" && cli_token != "undefined" {
-            cli_token
-        } else {
-            let read_token_result = execute_ssh(&sess, &format!(
-                "cat {}/openclaw.json 2>/dev/null || echo '{{}}'", openclaw_root
-            ));
-            if let Ok(contents) = read_token_result {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    if let Some(token) = parsed.get("gateway")
-                        .and_then(|g| g.get("auth"))
-                        .and_then(|a| a.get("token"))
-                        .and_then(|t| t.as_str())
-                    {
-                        token.to_string()
-                    } else {
-                        rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
-                    }
+        let read_token_result = execute_ssh(&sess, &format!(
+            "cat {}/openclaw.json 2>/dev/null || echo '{{}}'", openclaw_root
+        ));
+        if let Ok(contents) = read_token_result {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
+                if let Some(token) = parsed.get("gateway")
+                    .and_then(|g| g.get("auth"))
+                    .and_then(|a| a.get("token"))
+                    .and_then(|t| t.as_str())
+                {
+                    token.to_string()
                 } else {
                     rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
                 }
             } else {
                 rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
             }
+        } else {
+            rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
         }
     };
 
@@ -844,6 +839,9 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     let config_json_final = serde_json::to_string_pretty(&config_val).map_err(|e| e.to_string())?;
     let config_json_escaped = config_json_final.replace("'", "'\\''");
     execute_ssh(&sess, &format!("echo '{}' > {}/openclaw.json", config_json_escaped, openclaw_root))?;
+
+    // Force sync the token to keychain to permanently fix any token mismatches
+    let _ = execute_ssh(&sess, &format!("{}openclaw config set gateway.auth.token {}", nvm_prefix, gateway_token));
 
     // Store Clawnetes metadata in separate file on remote
     {
@@ -1381,30 +1379,24 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     // Always preserve existing/scaffolded gateway token to avoid device token mismatch
     let gateway_token: String = {
-        // Try getting token from CLI first, since openclaw.json might be formatted weirdly
-        let cli_token = shell_command("openclaw config get gateway.auth.token").unwrap_or_default().trim().trim_matches('"').to_string();
-        if !cli_token.is_empty() && cli_token != "null" && cli_token != "undefined" {
-            cli_token
-        } else {
-            let existing_config_path = format!("{}/openclaw.json", openclaw_root);
-            let contents = read_file_fn(&existing_config_path);
-            if !contents.is_empty() {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    if let Some(token) = parsed.get("gateway")
-                        .and_then(|g| g.get("auth"))
-                        .and_then(|a| a.get("token"))
-                        .and_then(|t| t.as_str())
-                    {
-                        token.to_string()
-                    } else {
-                        rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
-                    }
+        let existing_config_path = format!("{}/openclaw.json", openclaw_root);
+        let contents = read_file_fn(&existing_config_path);
+        if !contents.is_empty() {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
+                if let Some(token) = parsed.get("gateway")
+                    .and_then(|g| g.get("auth"))
+                    .and_then(|a| a.get("token"))
+                    .and_then(|t| t.as_str())
+                {
+                    token.to_string()
                 } else {
                     rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
                 }
             } else {
                 rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
             }
+        } else {
+            rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect()
         }
     };
 
@@ -1736,6 +1728,9 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     let config_json_raw = serde_json::to_string_pretty(&config_json).map_err(|e| e.to_string())?;
 
     write_file_fn(&format!("{}/openclaw.json", openclaw_root), &config_json_raw)?;
+    
+    // Force sync the token to keychain to permanently fix any token mismatches
+    let _ = shell_command(&format!("openclaw config set gateway.auth.token {}", gateway_token));
 
     // Store Clawnetes-specific metadata in a separate file
     {
