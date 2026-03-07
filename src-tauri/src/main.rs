@@ -1645,7 +1645,20 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     if let Some(defaults) = config_json.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
         // Initialize dynamic model entry
         if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
-            models.insert(config.model.clone(), serde_json::json!({}));
+            models.insert(config.model.clone(), serde_json::json!({
+                "provider": config.provider.clone()
+            }));
+            
+            // Also register fallback models so OpenClaw knows their providers
+            if let Some(fb) = config.fallback_models.as_ref() {
+                for fb_model in fb {
+                    if let Some(fb_prov) = fb_model.split('/').next() {
+                        models.insert(fb_model.clone(), serde_json::json!({
+                            "provider": fb_prov
+                        }));
+                    }
+                }
+            }
         }
 
         // Correctly place fallbacks under the specific model configuration
