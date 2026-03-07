@@ -1651,18 +1651,11 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     // Insert dynamic auth profile
     if let Some(profiles) = config_json.get_mut("auth").and_then(|a| a.get_mut("profiles")).and_then(|p| p.as_object_mut()) {
-        let mut profile = serde_json::json!({
+        let profile = serde_json::json!({
             "provider": config.provider,
             "mode": auth_mode
         });
-        // Add baseUrl for local/lmstudio providers
-        if let Some(ref base_url) = config.local_base_url {
-            if !base_url.is_empty() {
-                if let Some(obj) = profile.as_object_mut() {
-                    obj.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
-                }
-            }
-        }
+
         profiles.insert(profile_name.clone(), profile);
     }
 
