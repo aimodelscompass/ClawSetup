@@ -717,7 +717,7 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
                 obj.insert("channels".to_string(), serde_json::json!({
                     "telegram": {
                         "accounts": {
-                            "main": channel_config
+                            "default": channel_config
                         }
                     }
                 }));
@@ -1430,7 +1430,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
                 obj.insert("channels".to_string(), serde_json::json!({
                     "telegram": {
                         "accounts": {
-                            "main": {
+                            "default": {
                                 "botToken": token,
                                 "name": "Primary Bot",
                                 "dmPolicy": dm_policy
@@ -1484,7 +1484,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
     if let Some(ref thinking_level) = config.thinking_level {
         if config.provider == "anthropic" && !thinking_level.is_empty() && thinking_level != "off" {
             if let Some(defaults) = config_json.get_mut("agents").and_then(|a| a.get_mut("defaults")).and_then(|d| d.as_object_mut()) {
-                defaults.insert("thinking".to_string(), serde_json::json!({ "level": thinking_level }));
+                defaults.insert("thinkingDefault".to_string(), serde_json::Value::String(thinking_level.clone()));
             }
         }
     }
@@ -2250,7 +2250,7 @@ fn shell_command(cmd: &str) -> Result<String, String> {
 #[command]
 fn check_pairing_status(remote: Option<RemoteInfo>) -> Result<bool, String> {
     // Check dmPolicy via CLI to get actual active state
-    let cmd_raw = "openclaw config get channels.telegram.accounts.main.dmPolicy";
+    let cmd_raw = "openclaw config get channels.telegram.accounts.default.dmPolicy";
     let output = if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
         let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
@@ -2406,7 +2406,7 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     let telegram_token = oc_config.get("channels")
         .and_then(|c| c.get("telegram"))
         .and_then(|t| t.get("accounts"))
-        .and_then(|a| a.get("main"))
+        .and_then(|a| a.get("default"))
         .and_then(|m| m.get("botToken"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -2523,7 +2523,7 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     let dm_policy = oc_config.get("channels")
         .and_then(|c| c.get("telegram"))
         .and_then(|t| t.get("accounts"))
-        .and_then(|a| a.get("main"))
+        .and_then(|a| a.get("default"))
         .and_then(|m| m.get("dmPolicy"))
         .and_then(|v| v.as_str())
         .unwrap_or("default");
@@ -2583,8 +2583,7 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let thinking_level = defaults.get("thinking")
-        .and_then(|t| t.get("level"))
+    let thinking_level = defaults.get("thinkingDefault")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
