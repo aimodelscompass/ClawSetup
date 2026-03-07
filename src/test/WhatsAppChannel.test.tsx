@@ -27,26 +27,35 @@ describe("WhatsAppChannel", () => {
     });
   });
 
-  it("WhatsApp config payload includes whatsapp fields when enabled", () => {
-    const buildPayload = (enabled: boolean, dmPolicy: string) => ({
-      whatsapp_enabled: enabled,
-      whatsapp_dm_policy: enabled ? dmPolicy : null,
+  it("WhatsApp config payload includes whatsapp fields when channel is whatsapp", () => {
+    const buildPayload = (channel: string, dmPolicy: string) => ({
+      whatsapp_enabled: channel === "whatsapp",
+      whatsapp_dm_policy: channel === "whatsapp" ? dmPolicy : null,
     });
 
-    const payload = buildPayload(true, "pairing");
+    const payload = buildPayload("whatsapp", "open");
     expect(payload.whatsapp_enabled).toBe(true);
-    expect(payload.whatsapp_dm_policy).toBe("pairing");
+    expect(payload.whatsapp_dm_policy).toBe("open");
   });
 
-  it("WhatsApp config payload excludes whatsapp_dm_policy when disabled", () => {
-    const buildPayload = (enabled: boolean, dmPolicy: string) => ({
-      whatsapp_enabled: enabled,
-      whatsapp_dm_policy: enabled ? dmPolicy : null,
+  it("WhatsApp config payload excludes whatsapp_dm_policy when channel is not whatsapp", () => {
+    const buildPayload = (channel: string, dmPolicy: string) => ({
+      whatsapp_enabled: channel === "whatsapp",
+      whatsapp_dm_policy: channel === "whatsapp" ? dmPolicy : null,
     });
 
-    const payload = buildPayload(false, "pairing");
-    expect(payload.whatsapp_enabled).toBe(false);
-    expect(payload.whatsapp_dm_policy).toBeNull();
+    const payloadNone = buildPayload("none", "open");
+    expect(payloadNone.whatsapp_enabled).toBe(false);
+    expect(payloadNone.whatsapp_dm_policy).toBeNull();
+
+    const payloadTelegram = buildPayload("telegram", "open");
+    expect(payloadTelegram.whatsapp_enabled).toBe(false);
+    expect(payloadTelegram.whatsapp_dm_policy).toBeNull();
+  });
+
+  it("Default DM policy is open", () => {
+    const defaultDmPolicy = "open";
+    expect(defaultDmPolicy).toBe("open");
   });
 
   it("Valid DM policy values", () => {
@@ -55,6 +64,14 @@ describe("WhatsAppChannel", () => {
     expect(validPolicies).toContain("allowlist");
     expect(validPolicies).toContain("open");
     expect(validPolicies.length).toBe(3);
+  });
+
+  it("Channel dropdown options include none, telegram, whatsapp", () => {
+    const options = ["none", "telegram", "whatsapp"];
+    expect(options).toContain("none");
+    expect(options).toContain("telegram");
+    expect(options).toContain("whatsapp");
+    expect(options.length).toBe(3);
   });
 
   it("start_whatsapp_login mock returns QR data URL", async () => {

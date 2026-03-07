@@ -157,11 +157,12 @@ function App() {
 
   // OpenClaw latest features
   const [thinkingLevel, setThinkingLevel] = useState("adaptive");
-  const [acpDispatch, setAcpDispatch] = useState(true);
 
-  // WhatsApp channel state
-  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
-  const [whatsappDmPolicy, setWhatsappDmPolicy] = useState("pairing");
+  // Messaging channel state
+  const [messagingChannel, setMessagingChannel] = useState<"none" | "telegram" | "whatsapp">("none");
+  const [whatsappDmPolicy, setWhatsappDmPolicy] = useState("open");
+  const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState("");
+  const [whatsappPhoneSubmitted, setWhatsappPhoneSubmitted] = useState(false);
   const [whatsappQrDataUrl, setWhatsappQrDataUrl] = useState("");
   const [whatsappPaired, setWhatsappPaired] = useState(false);
   const [whatsappQrStep, setWhatsappQrStep] = useState(false);
@@ -171,8 +172,6 @@ function App() {
   const [validateOutput, setValidateOutput] = useState("");
   const [validating, setValidating] = useState(false);
 
-  // SecretRef toggle for API key
-  const [apiKeyIsSecretRef, setApiKeyIsSecretRef] = useState(false);
 
   const availableSkills = AVAILABLE_SKILLS;
 
@@ -553,7 +552,6 @@ Managed by Clawnetes.`,
       cron_jobs: initial.cron_jobs || null,
       local_base_url: initial.local_base_url || null,
       thinking_level: initial.thinking_level || null,
-      acp_dispatch: initial.acp_dispatch ?? true,
       whatsapp_enabled: initial.whatsapp_enabled || false,
       whatsapp_dm_policy: initial.whatsapp_dm_policy || null,
     };
@@ -626,10 +624,9 @@ Managed by Clawnetes.`,
         local_base_url: provider === "local" ? localBaseUrl : (provider === "lmstudio" ? lmstudioBaseUrl : null),
         // OpenClaw latest features
         thinking_level: (provider === "anthropic" && (model.includes("claude-") && model.includes("-4"))) ? thinkingLevel : null,
-        acp_dispatch: acpDispatch,
         // WhatsApp channel
-        whatsapp_enabled: whatsappEnabled,
-        whatsapp_dm_policy: whatsappEnabled ? whatsappDmPolicy : null,
+        whatsapp_enabled: messagingChannel === "whatsapp",
+        whatsapp_dm_policy: messagingChannel === "whatsapp" ? whatsappDmPolicy : null,
     };
   }
 
@@ -948,10 +945,10 @@ Managed by Clawnetes.`,
       if (config.cron_jobs) setCronJobs(config.cron_jobs);
 
       // Load new fields
-      if (config.whatsapp_enabled !== undefined) setWhatsappEnabled(config.whatsapp_enabled);
+      if (config.whatsapp_enabled) setMessagingChannel("whatsapp");
+      else if (config.telegram_token) setMessagingChannel("telegram");
       if (config.whatsapp_dm_policy) setWhatsappDmPolicy(config.whatsapp_dm_policy);
       if (config.thinking_level) setThinkingLevel(config.thinking_level);
-      if (config.acp_dispatch !== undefined) setAcpDispatch(config.acp_dispatch);
       if (config.local_base_url) {
         if (config.provider === "lmstudio") setLmstudioBaseUrl(config.local_base_url);
         else if (config.provider === "local") setLocalBaseUrl(config.local_base_url);
@@ -1951,27 +1948,14 @@ Managed by Clawnetes.`,
 
               {!["ollama", "lmstudio", "local"].includes(provider) && (
                 <div className="form-group" style={{marginTop: "1.5rem"}}>
-                  <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem"}}>
-                    <label style={{marginBottom: 0}}>{authMethod === "setup-token" ? "Anthropic Setup Token" : "API Key"}</label>
-                    <label style={{display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.8rem", cursor: "pointer"}}>
-                      <input
-                        type="checkbox"
-                        checked={apiKeyIsSecretRef}
-                        onChange={(e) => setApiKeyIsSecretRef(e.target.checked)}
-                      />
-                      Use Secret Reference
-                    </label>
-                  </div>
+                  <label>{authMethod === "setup-token" ? "Anthropic Setup Token" : "API Key"}</label>
                   <input
-                    type={apiKeyIsSecretRef ? "text" : "password"}
-                    placeholder={apiKeyIsSecretRef ? "$ENV_VAR_NAME or secretref:path" : "Paste here..."}
+                    type="password"
+                    placeholder="Paste here..."
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                   />
-                  {apiKeyIsSecretRef && (
-                    <p className="input-hint">Use <code>$ENV_VAR_NAME</code> to reference an environment variable, or <code>secretref:path</code> for a secrets manager path. OpenClaw resolves these at runtime.</p>
-                  )}
-                  {authMethod === "setup-token" && !apiKeyIsSecretRef && (
+                  {authMethod === "setup-token" && (
                     <p className="input-hint">
                       Run <code>claude setup-token</code> in your terminal and paste the result here.
                     </p>
@@ -2000,42 +1984,34 @@ Managed by Clawnetes.`,
         return (
           <div className="step-view">
             <h2>Messaging Channels</h2>
-            <p className="step-description">Connect your agent to Telegram and/or WhatsApp for easy access.</p>
+            <p className="step-description">Select a messaging channel for your agent.</p>
+
             <div className="form-group">
-              <label>Telegram Bot Token</label>
-              <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
-              <p className="input-hint">Get one from @BotFather on Telegram.</p>
+              <label>Channel</label>
+              <Dropdown
+                value={messagingChannel}
+                onChange={(v) => setMessagingChannel(v as "none" | "telegram" | "whatsapp")}
+                options={[
+                  { value: "none", label: "None", description: "Skip messaging channels" },
+                  { value: "telegram", label: "Telegram", description: "Connect via Telegram Bot" },
+                  { value: "whatsapp", label: "WhatsApp", description: "Connect via WhatsApp (QR pairing at end of setup)" },
+                ]}
+              />
             </div>
 
-            {/* WhatsApp Section */}
-            <div className="form-group" style={{marginTop: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--bg-card)"}}>
-              <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem"}}>
-                <label style={{marginBottom: 0, fontWeight: 600}}>WhatsApp</label>
-                <label style={{display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer"}}>
-                  <input
-                    type="checkbox"
-                    checked={whatsappEnabled}
-                    onChange={(e) => setWhatsappEnabled(e.target.checked)}
-                  />
-                  Enable WhatsApp
-                </label>
+            {messagingChannel === "telegram" && (
+              <div className="form-group" style={{marginTop: "1rem"}}>
+                <label>Telegram Bot Token</label>
+                <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
+                <p className="input-hint">Get one from @BotFather on Telegram.</p>
               </div>
-              {whatsappEnabled && (
-                <div className="form-group">
-                  <label>DM Policy</label>
-                  <Dropdown
-                    value={whatsappDmPolicy}
-                    onChange={setWhatsappDmPolicy}
-                    options={[
-                      { value: "pairing", label: "Pairing (Default)", description: "Unknown senders get a code; owner approves" },
-                      { value: "allowlist", label: "Allowlist", description: "Block messages from unknown senders" },
-                      { value: "open", label: "Open", description: "Accept inbound DMs from anyone" },
-                    ]}
-                  />
-                  <p className="input-hint">After deployment, you will be prompted to scan a QR code to link your WhatsApp account.</p>
-                </div>
-              )}
-            </div>
+            )}
+
+            {messagingChannel === "whatsapp" && (
+              <p className="input-hint" style={{marginTop: "1rem"}}>
+                WhatsApp pairing will happen at the end of setup. You'll scan a QR code to link your account.
+              </p>
+            )}
 
             <div className="button-group" style={{marginTop: "1.5rem"}}>
               <button className="primary" onClick={() => {
@@ -2458,6 +2434,18 @@ Managed by Clawnetes.`,
                   />
                 </div>
               )}
+              {provider === "lmstudio" && (
+                <div style={{marginTop: "0.75rem"}}>
+                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>LM Studio Base URL</label>
+                  <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {provider === "local" && (
+                <div style={{marginTop: "0.75rem"}}>
+                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>Custom Base URL</label>
+                  <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                </div>
+              )}
             </div>
 
             <h3 style={{marginTop: "1.5rem", marginBottom: "0.5rem"}}>Fallback Models</h3>
@@ -2518,6 +2506,20 @@ Managed by Clawnetes.`,
                             searchable={MODELS_BY_PROVIDER[currentProvider].length > 10}
                             options={MODELS_BY_PROVIDER[currentProvider].map(m => ({ value: m.value, label: m.label }))}
                           />
+                        </div>
+                      )}
+
+                      {/* Base URL for local providers */}
+                      {currentProvider === "lmstudio" && (
+                        <div style={{marginTop: "0.75rem"}}>
+                          <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>LM Studio Base URL</label>
+                          <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                        </div>
+                      )}
+                      {currentProvider === "local" && (
+                        <div style={{marginTop: "0.75rem"}}>
+                          <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>Custom Base URL</label>
+                          <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
                         </div>
                       )}
 
@@ -2981,7 +2983,19 @@ Managed by Clawnetes.`,
                 </div>
               )}
 
-              {currentAgentProvider && currentAgentProvider !== provider && !serviceKeys[currentAgentProvider] && !["ollama"].includes(currentAgentProvider) && (
+              {currentAgentProvider === "lmstudio" && (
+                <div style={{marginTop: "0.75rem"}}>
+                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>LM Studio Base URL</label>
+                  <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {currentAgentProvider === "local" && (
+                <div style={{marginTop: "0.75rem"}}>
+                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>Custom Base URL</label>
+                  <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {currentAgentProvider && currentAgentProvider !== provider && !serviceKeys[currentAgentProvider] && !["ollama", "lmstudio", "local"].includes(currentAgentProvider) && (
                  <div style={{marginTop: "0.5rem"}}>
                    <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentAgentProvider}</label>
                    <input
@@ -3049,6 +3063,18 @@ Managed by Clawnetes.`,
                        </div>
                      )}
 
+                     {currentFallbackProvider === "lmstudio" && (
+                       <div style={{marginTop: "0.75rem"}}>
+                         <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>LM Studio Base URL</label>
+                         <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                       </div>
+                     )}
+                     {currentFallbackProvider === "local" && (
+                       <div style={{marginTop: "0.75rem"}}>
+                         <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>Custom Base URL</label>
+                         <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                       </div>
+                     )}
                      {currentFallbackProvider && currentFallbackProvider !== provider && currentFallbackProvider !== currentAgentProvider && !serviceKeys[currentFallbackProvider] && !["ollama", "lmstudio", "local"].includes(currentFallbackProvider) && (
                        <div style={{marginTop: "0.5rem"}}>
                           <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentFallbackProvider}</label>
@@ -3406,28 +3432,6 @@ case 15.7:
               )}
             </div>
 
-            {/* ACP Dispatch */}
-            <div className="accordion-section" style={{marginBottom: "1rem"}}>
-              <div style={{padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "12px"}}>
-                <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
-                  <div>
-                    <div style={{fontWeight: 600, fontSize: "0.9rem"}}>ACP Dispatch</div>
-                    <div style={{fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.25rem"}}>
-                      Enable Agent Communication Protocol dispatch for multi-agent coordination
-                    </div>
-                  </div>
-                  <label style={{display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer"}}>
-                    <input
-                      type="checkbox"
-                      checked={acpDispatch}
-                      onChange={(e) => setAcpDispatch(e.target.checked)}
-                    />
-                    {acpDispatch ? "Enabled" : "Disabled"}
-                  </label>
-                </div>
-              </div>
-            </div>
-
             <div className="button-group">
               <button className="primary" onClick={() => setStep(16)}>Next</button>
               <button className="secondary" onClick={() => setStep(enableMultiAgent ? 15.5 : 15)}>Back</button>
@@ -3731,13 +3735,33 @@ case 16:
                )}
                
                {/* WhatsApp QR Pairing */}
-               {whatsappEnabled && !whatsappPaired && (
+               {messagingChannel === "whatsapp" && !whatsappPaired && (
                  <div style={{marginTop: "2rem", padding: "1.5rem", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "12px"}}>
                    <h3 style={{marginTop: 0, marginBottom: "0.5rem"}}>WhatsApp Pairing</h3>
                    <p style={{fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "1rem"}}>
                      Link your WhatsApp account to enable the WhatsApp channel.
                    </p>
-                   {!whatsappQrStep ? (
+                   {!whatsappPhoneSubmitted ? (
+                     <div>
+                       <label style={{fontSize: "0.9rem", marginBottom: "0.5rem", display: "block"}}>Your WhatsApp Phone Number</label>
+                       <input
+                         type="tel"
+                         placeholder="+1234567890"
+                         value={whatsappPhoneNumber}
+                         onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                         style={{marginBottom: "0.75rem"}}
+                       />
+                       <p className="input-hint">Include country code, e.g. +1234567890.</p>
+                       <button
+                         className="primary"
+                         style={{width: "100%"}}
+                         disabled={!whatsappPhoneNumber.trim()}
+                         onClick={() => setWhatsappPhoneSubmitted(true)}
+                       >
+                         Continue
+                       </button>
+                     </div>
+                   ) : !whatsappQrStep ? (
                      <button
                        className="primary"
                        style={{width: "100%"}}
@@ -3798,7 +3822,7 @@ case 16:
                  </div>
                )}
 
-               {whatsappEnabled && whatsappPaired && (
+               {messagingChannel === "whatsapp" && whatsappPaired && (
                  <div style={{marginTop: "1rem", padding: "1rem", background: "rgba(34, 197, 94, 0.1)", border: "1px solid var(--success)", borderRadius: "8px", textAlign: "center"}}>
                    <p style={{color: "var(--success)", fontWeight: 600, margin: 0}}>WhatsApp linked successfully!</p>
                  </div>

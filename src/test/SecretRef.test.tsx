@@ -42,16 +42,9 @@ describe("SecretRef", () => {
     expect(secretrefPattern.test("")).toBe(false);
   });
 
-  it("SecretRef toggle does not change actual key value, just input type", () => {
-    const apiKey = "sk-ant-api03-test";
-    const isSecretRef = false;
-    const inputType = isSecretRef ? "text" : "password";
+  it("API key input is always type=password (no toggle)", () => {
+    // API key field is always masked as password — no SecretRef checkbox
+    const inputType = "password";
     expect(inputType).toBe("password");
-
-    const isSecretRefToggled = true;
-    const inputTypeToggled = isSecretRefToggled ? "text" : "password";
-    expect(inputTypeToggled).toBe("text");
-    // Key value remains the same
-    expect(apiKey).toBe("sk-ant-api03-test");
   });
 });

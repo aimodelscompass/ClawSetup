@@ -105,7 +105,6 @@ struct CurrentConfig {
     cron_jobs: Option<Vec<CronJobConfig>>,
     local_base_url: Option<String>,
     thinking_level: Option<String>,
-    acp_dispatch: Option<bool>,
     whatsapp_enabled: Option<bool>,
     whatsapp_dm_policy: Option<String>,
 }
@@ -156,7 +155,6 @@ struct AgentConfig {
     local_base_url: Option<String>,
     // OpenClaw latest features
     thinking_level: Option<String>,
-    acp_dispatch: Option<bool>,
     // WhatsApp channel
     whatsapp_enabled: Option<bool>,
     whatsapp_dm_policy: Option<String>,
@@ -1446,7 +1444,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
 
     // Add WhatsApp config inline if enabled
     if config.whatsapp_enabled.unwrap_or(false) {
-        let dm_policy = config.whatsapp_dm_policy.as_deref().unwrap_or("pairing");
+        let dm_policy = config.whatsapp_dm_policy.as_deref().unwrap_or("open");
         if let Some(obj) = config_json.as_object_mut() {
             // Merge plugins entries (may already have telegram)
             let plugins_entry = obj.entry("plugins".to_string()).or_insert(serde_json::json!({ "entries": {} }));
@@ -1459,7 +1457,7 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
             if let Some(channels_obj) = channels_entry.as_object_mut() {
                 channels_obj.insert("whatsapp".to_string(), serde_json::json!({
                     "accounts": {
-                        "main": {
+                        "default": {
                             "dmPolicy": dm_policy
                         }
                     }
@@ -1468,12 +1466,6 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         }
     }
 
-    // Add ACP dispatch config if specified
-    if let Some(acp_dispatch) = config.acp_dispatch {
-        if let Some(obj) = config_json.as_object_mut() {
-            obj.insert("dispatch".to_string(), serde_json::json!({ "acp": acp_dispatch }));
-        }
-    }
 
     // Add thinking level for Claude 4.x models via Anthropic provider
     if let Some(ref thinking_level) = config.thinking_level {
@@ -2573,7 +2565,7 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     let whatsapp_dm_policy = oc_config.get("channels")
         .and_then(|c| c.get("whatsapp"))
         .and_then(|w| w.get("accounts"))
-        .and_then(|a| a.get("main"))
+        .and_then(|a| a.get("default"))
         .and_then(|m| m.get("dmPolicy"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
@@ -2582,10 +2574,6 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
         .and_then(|t| t.get("level"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-
-    let acp_dispatch = oc_config.get("dispatch")
-        .and_then(|d| d.get("acp"))
-        .and_then(|v| v.as_bool());
 
     Ok(CurrentConfig {
         provider,
@@ -2626,7 +2614,6 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
         cron_jobs,
         local_base_url: None,
         thinking_level,
-        acp_dispatch,
         whatsapp_enabled: Some(whatsapp_enabled),
         whatsapp_dm_policy,
     })

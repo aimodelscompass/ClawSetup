@@ -181,7 +181,6 @@ export interface ConfigPayload {
   local_base_url?: string | null;
   // OpenClaw latest features
   thinking_level?: string | null;
-  acp_dispatch?: boolean;
   // WhatsApp channel
   whatsapp_enabled?: boolean;
   whatsapp_dm_policy?: string | null;
