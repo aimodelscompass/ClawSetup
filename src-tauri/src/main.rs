@@ -876,7 +876,17 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
     let mut primary_p = serde_json::Map::new();
     primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode));
     primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
-    primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+    let token = if config.provider == "ollama" || config.provider == "lmstudio" || config.provider == "local" {
+        "dummy-token".to_string()
+    } else {
+        config.api_key.clone()
+    };
+    primary_p.insert("token".to_string(), serde_json::Value::String(token));
+    if let Some(ref base_url) = config.local_base_url {
+        if !base_url.is_empty() {
+            primary_p.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+        }
+    }
     profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
 
     if let Some(service_keys) = &config.service_keys {
@@ -886,6 +896,28 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
             p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
             p.insert("token".to_string(), serde_json::Value::String(key.clone()));
             profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+        }
+    }
+    
+    // Add dummy tokens for fallback models if they are local
+    if let Some(fb) = &config.fallback_models {
+        for model in fb {
+            if let Some(provider) = model.split('/').next() {
+                if provider == "ollama" || provider == "lmstudio" || provider == "local" {
+                    let mut p = serde_json::Map::new();
+                    p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+                    p.insert("provider".to_string(), serde_json::Value::String(provider.to_string()));
+                    p.insert("token".to_string(), serde_json::Value::String("dummy-token".to_string()));
+                    if provider == "lmstudio" || provider == "local" {
+                        if let Some(ref base_url) = config.local_base_url {
+                            if !base_url.is_empty() {
+                                p.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+                            }
+                        }
+                    }
+                    profiles_map.insert(format!("{}:default", provider), serde_json::Value::Object(p));
+                }
+            }
         }
     }
 
@@ -1789,7 +1821,17 @@ Serve {}."#, config.user_name)
             let mut primary_ai = serde_json::Map::new();
             primary_ai.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
             primary_ai.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
-            primary_ai.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+            let token = if config.provider == "ollama" || config.provider == "lmstudio" || config.provider == "local" {
+                "dummy-token".to_string()
+            } else {
+                config.api_key.clone()
+            };
+            primary_ai.insert("token".to_string(), serde_json::Value::String(token));
+            if let Some(ref base_url) = config.local_base_url {
+                if !base_url.is_empty() {
+                    primary_ai.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+                }
+            }
             agent_profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_ai));
 
             if let Some(service_keys) = &config.service_keys {
@@ -1799,6 +1841,28 @@ Serve {}."#, config.user_name)
                     p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
                     p.insert("token".to_string(), serde_json::Value::String(key.clone()));
                     agent_profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+                }
+            }
+            
+            // Fallbacks for agents
+            if let Some(fb) = &config.fallback_models {
+                for model in fb {
+                    if let Some(provider) = model.split('/').next() {
+                        if provider == "ollama" || provider == "lmstudio" || provider == "local" {
+                            let mut p = serde_json::Map::new();
+                            p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+                            p.insert("provider".to_string(), serde_json::Value::String(provider.to_string()));
+                            p.insert("token".to_string(), serde_json::Value::String("dummy-token".to_string()));
+                            if provider == "lmstudio" || provider == "local" {
+                                if let Some(ref base_url) = config.local_base_url {
+                                    if !base_url.is_empty() {
+                                        p.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+                                    }
+                                }
+                            }
+                            agent_profiles_map.insert(format!("{}:default", provider), serde_json::Value::Object(p));
+                        }
+                    }
                 }
             }
 
@@ -1827,7 +1891,17 @@ Serve {}."#, config.user_name)
     let mut primary_p = serde_json::Map::new();
     primary_p.insert("type".to_string(), serde_json::Value::String(auth_mode.clone()));
     primary_p.insert("provider".to_string(), serde_json::Value::String(config.provider.clone()));
-    primary_p.insert("token".to_string(), serde_json::Value::String(config.api_key.clone()));
+    let token = if config.provider == "ollama" || config.provider == "lmstudio" || config.provider == "local" {
+        "dummy-token".to_string()
+    } else {
+        config.api_key.clone()
+    };
+    primary_p.insert("token".to_string(), serde_json::Value::String(token));
+    if let Some(ref base_url) = config.local_base_url {
+        if !base_url.is_empty() {
+            primary_p.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+        }
+    }
     profiles_map.insert(profile_name.clone(), serde_json::Value::Object(primary_p));
 
     if let Some(service_keys) = &config.service_keys {
@@ -1837,6 +1911,28 @@ Serve {}."#, config.user_name)
             p.insert("provider".to_string(), serde_json::Value::String(sid.clone()));
             p.insert("token".to_string(), serde_json::Value::String(key.clone()));
             profiles_map.insert(format!("{}:default", sid), serde_json::Value::Object(p));
+        }
+    }
+    
+    // Fallbacks for main agent
+    if let Some(fb) = &config.fallback_models {
+        for model in fb {
+            if let Some(provider) = model.split('/').next() {
+                if provider == "ollama" || provider == "lmstudio" || provider == "local" {
+                    let mut p = serde_json::Map::new();
+                    p.insert("type".to_string(), serde_json::Value::String("token".to_string()));
+                    p.insert("provider".to_string(), serde_json::Value::String(provider.to_string()));
+                    p.insert("token".to_string(), serde_json::Value::String("dummy-token".to_string()));
+                    if provider == "lmstudio" || provider == "local" {
+                        if let Some(ref base_url) = config.local_base_url {
+                            if !base_url.is_empty() {
+                                p.insert("baseUrl".to_string(), serde_json::Value::String(base_url.clone()));
+                            }
+                        }
+                    }
+                    profiles_map.insert(format!("{}:default", provider), serde_json::Value::Object(p));
+                }
+            }
         }
     }
 
