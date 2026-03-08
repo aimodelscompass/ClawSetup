@@ -3457,12 +3457,27 @@ async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<(), Stri
         let nvm_prefix = get_env_prefix(&execute_ssh(&sess, "uname -s")?.trim().to_string());
         execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))?;
     } else {
-        match shell_command("openclaw gateway restart") {
-            Ok(_) => {}
-            Err(e) => return Err(format!("Gateway restart failed: {}", e))
+        // 'openclaw gateway restart' uses launchctl kickstart which fails with
+        // "Operation not permitted" from Tauri's subprocess context.
+        // Use the same stop → bootstrap → start pattern as start_gateway() instead.
+        let _ = shell_command("openclaw gateway stop");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        #[cfg(target_os = "macos")]
+        if let Some(home) = dirs::home_dir() {
+            let plist = home.join("Library/LaunchAgents/ai.openclaw.gateway.plist");
+            if plist.exists() {
+                let _ = shell_command(&format!(
+                    "launchctl bootstrap gui/$(id -u) \"{}\"",
+                    plist.to_string_lossy()
+                ));
+            }
         }
+
+        shell_command("openclaw gateway start")
+            .map_err(|e| format!("Gateway restart failed: {}", e))?;
     }
-    // Wait for gateway to fully restart before returning
+    // Wait for gateway to fully start before returning
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     Ok(())
 }
