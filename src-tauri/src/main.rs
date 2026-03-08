@@ -3451,19 +3451,21 @@ async fn check_whatsapp_linked(gateway_port: u16) -> Result<bool, String> {
 }
 
 #[command]
-async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<(), String> {
-    if let Some(r) = remote {
+async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<String, String> {
+    let result = if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
-        let nvm_prefix = get_env_prefix(&execute_ssh(&sess, "uname -s")?.trim().to_string());
-        execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))?;
+        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let nvm_prefix = get_env_prefix(&os_type);
+        execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))
     } else {
-        match shell_command("openclaw gateway restart") {
-            Ok(_) => {},
-            Err(e) => return Err(format!("Gateway restart failed: {}", e))
-        }
-    }
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    Ok(())
+        // Local shell_command uses login shells (e.g. zsh -l) so PATH (including brew/nvm) is naturally loaded
+        shell_command("openclaw gateway restart")
+    };
+    
+    // Additional buffer for gateway to fully start
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    
+    result.map_err(|e| format!("Gateway restart failed: {}", e))
 }
 
 fn main() {
