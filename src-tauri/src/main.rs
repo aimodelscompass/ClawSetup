@@ -3451,21 +3451,21 @@ async fn check_whatsapp_linked(gateway_port: u16) -> Result<bool, String> {
 }
 
 #[command]
-async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<String, String> {
-    let result = if let Some(r) = remote {
+async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<(), String> {
+    if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
-        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
-        let nvm_prefix = get_env_prefix(&os_type);
-        execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))
+        let nvm_prefix = get_env_prefix(&execute_ssh(&sess, "uname -s")?.trim().to_string());
+        // Use || true so the command never fails due to non-zero exit (e.g. stderr output during teardown)
+        execute_ssh(&sess, &format!("{}openclaw gateway restart 2>&1 || true", nvm_prefix))?;
     } else {
-        // Local shell_command uses login shells (e.g. zsh -l) so PATH (including brew/nvm) is naturally loaded
-        shell_command("openclaw gateway restart")
-    };
-    
-    // Additional buffer for gateway to fully start
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    
-    result.map_err(|e| format!("Gateway restart failed: {}", e))
+        // Use || true so a non-zero exit code (e.g. from stderr during WhatsApp session teardown)
+        // does not prevent the restart from completing and the gateway from starting
+        shell_command("openclaw gateway restart 2>&1 || true")
+            .map_err(|e| format!("Gateway restart failed: {}", e))?;
+    }
+    // Give the gateway enough time to fully restart and load WhatsApp credentials
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    Ok(())
 }
 
 fn main() {
