@@ -3116,16 +3116,77 @@ fn validate_openclaw_config(remote: Option<RemoteInfo>, is_wsl: Option<bool>) ->
 async fn start_whatsapp_login(gateway_port: u16) -> Result<String, String> {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::protocol::Message;
+    use futures_util::{StreamExt, SinkExt};
 
     let url = format!("ws://127.0.0.1:{}", gateway_port);
     let (mut ws_stream, _) = connect_async(&url).await
         .map_err(|e| format!("WebSocket connect failed: {}", e))?;
 
+    let connect_req_id = uuid::Uuid::new_v4().to_string();
+    let mut connect_msg = serde_json::json!({
+        "type": "req",
+        "id": connect_req_id,
+        "method": "connect",
+        "params": {
+            "client": {
+                "id": "gateway-client",
+                "version": "1.0",
+                "platform": std::env::consts::OS,
+                "mode": "backend"
+            },
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "role": "operator",
+            "scopes": ["operator.admin"]
+        }
+    });
+
+    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
+    if let Ok(oc_config) = serde_json::from_str::<serde_json::Value>(&openclaw_json_str) {
+        if let Some(token) = oc_config.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()) {
+            if let Some(params) = connect_msg.get_mut("params").and_then(|p| p.as_object_mut()) {
+                params.insert("auth".to_string(), serde_json::json!({ "token": token }));
+            }
+        }
+    }
+
+    ws_stream.send(Message::Text(connect_msg.to_string())).await
+        .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
+
+    let mut handshake_ok = false;
+    while let Some(msg) = ws_stream.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
+                    if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                        handshake_ok = true;
+                        break;
+                    } else {
+                        return Err(format!("Gateway connect handshake failed: {}", text));
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => return Err("WebSocket closed during handshake".to_string()),
+            Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
+            _ => {}
+        }
+    }
+
+    if !handshake_ok {
+        return Err("Gateway connect handshake failed".to_string());
+    }
+
     let request_id = uuid::Uuid::new_v4().to_string();
     let rpc_msg = serde_json::json!({
+        "type": "req",
         "id": request_id,
         "method": "web.login.start",
-        "params": { "timeoutMs": 30000 }
+        "params": { 
+            "timeoutMs": 30000,
+            "force": true
+        }
     });
 
     ws_stream.send(Message::Text(rpc_msg.to_string())).await
@@ -3137,13 +3198,14 @@ async fn start_whatsapp_login(gateway_port: u16) -> Result<String, String> {
             Ok(Message::Text(text)) => {
                 let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
                 if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
-                    if let Some(qr) = val.get("result")
-                        .and_then(|r| r.get("qrDataUrl"))
-                        .and_then(|v| v.as_str())
-                    {
-                        return Ok(qr.to_string());
-                    }
-                    if let Some(err) = val.get("error") {
+                    if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        if let Some(qr) = val.get("payload")
+                            .and_then(|r| r.get("qrDataUrl"))
+                            .and_then(|v| v.as_str())
+                        {
+                            return Ok(qr.to_string());
+                        }
+                    } else if let Some(err) = val.get("error") {
                         return Err(format!("Gateway error: {}", err));
                     }
                 }
@@ -3161,13 +3223,71 @@ async fn start_whatsapp_login(gateway_port: u16) -> Result<String, String> {
 async fn wait_whatsapp_login(gateway_port: u16) -> Result<bool, String> {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::protocol::Message;
+    use futures_util::{StreamExt, SinkExt};
 
     let url = format!("ws://127.0.0.1:{}", gateway_port);
     let (mut ws_stream, _) = connect_async(&url).await
         .map_err(|e| format!("WebSocket connect failed: {}", e))?;
 
+    let connect_req_id = uuid::Uuid::new_v4().to_string();
+    let mut connect_msg = serde_json::json!({
+        "type": "req",
+        "id": connect_req_id,
+        "method": "connect",
+        "params": {
+            "client": {
+                "id": "gateway-client",
+                "version": "1.0",
+                "platform": std::env::consts::OS,
+                "mode": "backend"
+            },
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "role": "operator",
+            "scopes": ["operator.admin"]
+        }
+    });
+
+    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
+    if let Ok(oc_config) = serde_json::from_str::<serde_json::Value>(&openclaw_json_str) {
+        if let Some(token) = oc_config.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()) {
+            if let Some(params) = connect_msg.get_mut("params").and_then(|p| p.as_object_mut()) {
+                params.insert("auth".to_string(), serde_json::json!({ "token": token }));
+            }
+        }
+    }
+
+    ws_stream.send(Message::Text(connect_msg.to_string())).await
+        .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
+
+    let mut handshake_ok = false;
+    while let Some(msg) = ws_stream.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
+                    if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                        handshake_ok = true;
+                        break;
+                    } else {
+                        return Err(format!("Gateway connect handshake failed: {}", text));
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => return Err("WebSocket closed during handshake".to_string()),
+            Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
+            _ => {}
+        }
+    }
+
+    if !handshake_ok {
+        return Err("Gateway connect handshake failed".to_string());
+    }
+
     let request_id = uuid::Uuid::new_v4().to_string();
     let rpc_msg = serde_json::json!({
+        "type": "req",
         "id": request_id,
         "method": "web.login.wait",
         "params": { "timeoutMs": 120000 }
@@ -3184,11 +3304,15 @@ async fn wait_whatsapp_login(gateway_port: u16) -> Result<bool, String> {
                     Ok(Message::Text(text)) => {
                         let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
                         if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
-                            let connected = val.get("result")
-                                .and_then(|r| r.get("connected"))
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                            return Ok(connected);
+                            if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                let connected = val.get("payload")
+                                    .and_then(|r| r.get("connected"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                return Ok(connected);
+                            } else if let Some(err) = val.get("error") {
+                                return Err(format!("Gateway error: {}", err));
+                            }
                         }
                     }
                     Ok(Message::Close(_)) => break,
@@ -3205,19 +3329,143 @@ async fn wait_whatsapp_login(gateway_port: u16) -> Result<bool, String> {
         Err(_) => Err("WhatsApp login wait timed out".to_string()),
     }
 }
+#[command]
+async fn wipe_whatsapp_session() -> Result<(), String> {
+    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let session_dir = format!("{}/.openclaw/credentials/whatsapp/default", home_dir);
+    if std::path::Path::new(&session_dir).exists() {
+        std::fs::remove_dir_all(&session_dir).map_err(|e| format!("Failed to delete whatsapp session: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Check if WhatsApp creds are saved by calling web.login.start WITHOUT force.
+/// If creds exist, OpenClaw returns ok:true with no qrDataUrl ("already linked").
+#[command]
+async fn check_whatsapp_linked(gateway_port: u16) -> Result<bool, String> {
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::protocol::Message;
+    use futures_util::{StreamExt, SinkExt};
+
+    let url = format!("ws://127.0.0.1:{}", gateway_port);
+    let (mut ws_stream, _) = connect_async(&url).await
+        .map_err(|e| format!("WebSocket connect failed: {}", e))?;
+
+    // Connect handshake
+    let connect_req_id = uuid::Uuid::new_v4().to_string();
+    let mut connect_msg = serde_json::json!({
+        "type": "req",
+        "id": connect_req_id,
+        "method": "connect",
+        "params": {
+            "client": {
+                "id": "gateway-client",
+                "version": "1.0",
+                "platform": std::env::consts::OS,
+                "mode": "backend"
+            },
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "role": "operator",
+            "scopes": ["operator.admin"]
+        }
+    });
+
+    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
+    if let Ok(oc_config) = serde_json::from_str::<serde_json::Value>(&openclaw_json_str) {
+        if let Some(token) = oc_config.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()) {
+            if let Some(params) = connect_msg.get_mut("params").and_then(|p| p.as_object_mut()) {
+                params.insert("auth".to_string(), serde_json::json!({ "token": token }));
+            }
+        }
+    }
+
+    ws_stream.send(Message::Text(connect_msg.to_string())).await
+        .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
+
+    // Wait for handshake response
+    while let Some(msg) = ws_stream.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
+                    if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                        break;
+                    } else {
+                        return Err(format!("Gateway handshake failed: {}", text));
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => return Err("WebSocket closed during handshake".to_string()),
+            Err(e) => return Err(format!("WebSocket error: {}", e)),
+            _ => {}
+        }
+    }
+
+    // Call web.login.start WITHOUT force — if creds exist, returns "already linked" with no QR
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let rpc_msg = serde_json::json!({
+        "type": "req",
+        "id": request_id,
+        "method": "web.login.start",
+        "params": { "timeoutMs": 10000 }
+    });
+
+    ws_stream.send(Message::Text(rpc_msg.to_string())).await
+        .map_err(|e| format!("WebSocket send failed: {}", e))?;
+
+    let timeout = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        async {
+            while let Some(msg) = ws_stream.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                        if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
+                            if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                // If no qrDataUrl → creds exist, already linked
+                                let has_qr = val.get("payload")
+                                    .and_then(|r| r.get("qrDataUrl"))
+                                    .and_then(|v| v.as_str())
+                                    .is_some();
+                                return Ok(!has_qr);
+                            } else {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Err(e) => return Err(format!("WebSocket error: {}", e)),
+                    _ => {}
+                }
+            }
+            Ok(false)
+        }
+    ).await;
+
+    match timeout {
+        Ok(result) => result,
+        Err(_) => Ok(false),
+    }
+}
 
 #[command]
-async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<(), String> {
-    if let Some(r) = remote {
+async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<String, String> {
+    let result = if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
-        let nvm_prefix = get_env_prefix(&execute_ssh(&sess, "uname -s")?.trim().to_string());
-        execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))?;
+        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let nvm_prefix = get_env_prefix(&os_type);
+        execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))
     } else {
+        // Local shell_command uses login shells (e.g. zsh -l) so PATH (including brew/nvm) is naturally loaded
         shell_command("openclaw gateway restart")
-            .map_err(|e| format!("Gateway restart failed: {}", e))?;
-    }
+    };
+    
+    // Additional buffer for gateway to fully start
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    Ok(())
+    
+    result.map_err(|e| format!("Gateway restart failed: {}", e))
 }
 
 fn main() {
@@ -3261,6 +3509,8 @@ fn main() {
             validate_openclaw_config,
             start_whatsapp_login,
             wait_whatsapp_login,
+            wipe_whatsapp_session,
+            check_whatsapp_linked,
             restart_openclaw_gateway
         ])
         .run(tauri::generate_context!())

@@ -167,6 +167,7 @@ function App() {
   const [whatsappPaired, setWhatsappPaired] = useState(false);
   const [whatsappQrStep, setWhatsappQrStep] = useState(false);
   const [whatsappQrLoading, setWhatsappQrLoading] = useState(false);
+  const [whatsappRestarting, setWhatsappRestarting] = useState(false);
 
   // Config validation
   const [validateOutput, setValidateOutput] = useState("");
@@ -3941,17 +3942,50 @@ Managed by Clawnetes.`,
                         try {
                           const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort });
                           setWhatsappQrDataUrl(qrDataUrl);
-                          // Start waiting for scan in background, then restart gateway
-                          invoke("wait_whatsapp_login", { gatewayPort }).then(async (connected: any) => {
-                            if (connected) {
-                              console.log("WhatsApp linked successfully, restarting gateway to apply allowlist...");
-                              setWhatsappQrDataUrl("");
+                          const connected = await invoke("wait_whatsapp_login", { gatewayPort });
+                          if (connected) {
+                            console.log("WhatsApp linked successfully, saving session and restarting gateway...");
+                            setWhatsappQrDataUrl("");
+                            setWhatsappRestarting(true);
+                            // Wait 5 seconds for Baileys to fully flush credentials to SQLite
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                            try {
                               await invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null });
-                              setWhatsappPaired(true);
+                            } catch (err) {
+                              console.error("Gateway restart failed:", err);
                             }
-                          }).catch(console.error);
-                        } catch (e: any) {
-                          console.error("WhatsApp QR start failed:", e);
+                            setWhatsappRestarting(false);
+                            setWhatsappPaired(true);
+                          } else {
+                            // 515 recovery: creds may be saved from the scan, check & restart
+                            console.log("wait_whatsapp_login returned false, checking if creds were saved...");
+                            setWhatsappRestarting(true);
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                            try {
+                              await invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null });
+                              const linked: boolean = await invoke("check_whatsapp_linked", { gatewayPort });
+                              if (linked) {
+                                console.log("WhatsApp linked after gateway restart!");
+                                setWhatsappPaired(true);
+                                setWhatsappQrDataUrl("");
+                              } else {
+                                alert("Pairing failed. Please click \"Start WhatsApp Pairing\" to try again.");
+                                setWhatsappQrDataUrl("");
+                                setWhatsappQrStep(false);
+                              }
+                            } catch (restartErr) {
+                              console.error("Gateway restart check failed:", restartErr);
+                              alert("Pairing failed. Please click \"Start WhatsApp Pairing\" to try again.");
+                              setWhatsappQrDataUrl("");
+                              setWhatsappQrStep(false);
+                            }
+                            setWhatsappRestarting(false);
+                          }
+                        } catch (err) {
+                          console.error(err);
+                          alert("WhatsApp pairing error: " + err);
+                          setWhatsappQrDataUrl("");
+                          setWhatsappQrStep(false);
                         }
                         setWhatsappQrLoading(false);
                       }}
@@ -3977,16 +4011,46 @@ Managed by Clawnetes.`,
                               try {
                                 const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort });
                                 setWhatsappQrDataUrl(qrDataUrl);
-                                invoke("wait_whatsapp_login", { gatewayPort }).then(async (connected: any) => {
-                                  if (connected) {
-                                    console.log("WhatsApp linked successfully, restarting gateway to apply allowlist...");
-                                    setWhatsappQrDataUrl("");
+                                const connected = await invoke("wait_whatsapp_login", { gatewayPort });
+                                if (connected) {
+                                  console.log("WhatsApp linked successfully, saving session and restarting gateway...");
+                                  setWhatsappQrDataUrl("");
+                                  setWhatsappRestarting(true);
+                                  await new Promise(resolve => setTimeout(resolve, 5000));
+                                  try {
                                     await invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null });
-                                    setWhatsappPaired(true);
+                                  } catch (err) {
+                                    console.error("Gateway restart failed:", err);
                                   }
-                                }).catch(console.error);
-                              } catch (e) {
-                                console.error("Refresh QR failed:", e);
+                                  setWhatsappRestarting(false);
+                                  setWhatsappPaired(true);
+                                } else {
+                                  // 515 recovery: check saved creds & restart gateway
+                                  console.log("wait_whatsapp_login returned false, checking if creds were saved...");
+                                  setWhatsappRestarting(true);
+                                  await new Promise(resolve => setTimeout(resolve, 3000));
+                                  try {
+                                    await invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null });
+                                    const linked: boolean = await invoke("check_whatsapp_linked", { gatewayPort });
+                                    if (linked) {
+                                      console.log("WhatsApp linked after gateway restart!");
+                                      setWhatsappPaired(true);
+                                      setWhatsappQrDataUrl("");
+                                    } else {
+                                      alert("Pairing failed. Please click \"Refresh QR\" to try again.");
+                                      setWhatsappQrDataUrl("");
+                                    }
+                                  } catch (restartErr) {
+                                    console.error("Gateway restart check failed:", restartErr);
+                                    alert("Pairing failed. Please click \"Refresh QR\" to try again.");
+                                    setWhatsappQrDataUrl("");
+                                  }
+                                  setWhatsappRestarting(false);
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                alert("WhatsApp pairing error: " + err);
+                                setWhatsappQrDataUrl("");
                               }
                             }}
                           >
@@ -4001,7 +4065,14 @@ Managed by Clawnetes.`,
                 </div>
               )}
 
-              {messagingChannel === "whatsapp" && whatsappPaired && (
+              {messagingChannel === "whatsapp" && whatsappRestarting && (
+                <div style={{ marginTop: "1rem", padding: "1rem", background: "rgba(59, 130, 246, 0.1)", border: "1px solid var(--primary)", borderRadius: "8px", textAlign: "center" }}>
+                  <p style={{ color: "var(--primary)", fontWeight: 600, margin: 0 }}>Finalizing connection... (this takes ~10 seconds)</p>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "0.5rem", marginBottom: 0 }}>Please wait while the gateway saves your session securely.</p>
+                </div>
+              )}
+
+              {messagingChannel === "whatsapp" && whatsappPaired && !whatsappRestarting && (
                 <div style={{ marginTop: "1rem", padding: "1rem", background: "rgba(34, 197, 94, 0.1)", border: "1px solid var(--success)", borderRadius: "8px", textAlign: "center" }}>
                   <p style={{ color: "var(--success)", fontWeight: 600, margin: 0 }}>WhatsApp linked successfully!</p>
                 </div>
