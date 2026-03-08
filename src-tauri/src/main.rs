@@ -3456,33 +3456,14 @@ async fn restart_openclaw_gateway(remote: Option<RemoteInfo>) -> Result<(), Stri
         let sess = connect_ssh(&r)?;
         let nvm_prefix = get_env_prefix(&execute_ssh(&sess, "uname -s")?.trim().to_string());
         execute_ssh(&sess, &format!("{}openclaw gateway restart", nvm_prefix))?;
-        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
     } else {
-        // Explicit stop then start — more reliable than 'restart' for picking up new credentials.
-        // 'restart' may exit before the old process fully terminates, causing a race condition
-        // where the new gateway starts before WhatsApp credentials are readable from disk.
-        let _ = shell_command("openclaw gateway stop");
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        shell_command("openclaw gateway start")
-            .map_err(|e| format!("Gateway start failed: {}", e))?;
-
-        // Read configured gateway port (defaults to 18789)
-        let port: u16 = dirs::home_dir()
-            .and_then(|h| std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", h.display())).ok())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| v.get("gateway").and_then(|g| g.get("port")).and_then(|p| p.as_u64()))
-            .map(|p| p as u16)
-            .unwrap_or(18789);
-
-        // Poll until gateway is accepting connections (mirrors start_gateway's retry loop)
-        for _ in 0..10 {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await.is_ok() {
-                return Ok(());
-            }
+        match shell_command("openclaw gateway restart") {
+            Ok(_) => {}
+            Err(e) => return Err(format!("Gateway restart failed: {}", e))
         }
     }
+    // Wait for gateway to fully restart before returning
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     Ok(())
 }
 
