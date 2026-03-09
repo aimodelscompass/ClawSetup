@@ -19,13 +19,24 @@ function App() {
     setPairingStatus("");
     setSkipBasicConfig(true);
     setMaintCompleted(true);
+    // When coming from the success screen (step 17), load the just-deployed config as the
+    // comparison baseline so that clicking through advanced settings without any changes
+    // is correctly detected and does not trigger a redeploy.
+    if (step === 17 && !initialConfigRef.current) {
+      try {
+        const config: any = await invoke("get_current_config", { remote: null });
+        initialConfigRef.current = config;
+      } catch (e) {
+        console.warn("Could not load config baseline for change detection:", e);
+      }
+    }
     setStep(10.5);
   };
 
   const [step, setStep] = useState(0.5); // Start at Welcome page
   const [mode, setMode] = useState("basic"); // "basic" or "advanced"
   const initialConfigRef = useRef<any>(null);
-  
+
   // Environment selection
   const [targetEnvironment, setTargetEnvironment] = useState("local");
 
@@ -53,7 +64,7 @@ function App() {
   const [agentEmoji, setAgentEmoji] = useState("🦞");
   const [agentType, setAgentType] = useState<AgentTypeId>("custom");
   const [apiKey, setApiKey] = useState("");
-  const [authMethod, setAuthMethod] = useState("token"); 
+  const [authMethod, setAuthMethod] = useState("token");
   const [provider, setProvider] = useState("anthropic");
   const [model, setModel] = useState("anthropic/claude-opus-4-6");
   const [telegramToken, setTelegramToken] = useState("");
@@ -145,6 +156,35 @@ function App() {
   const [pairingStatus, setPairingStatus] = useState("");
   const [isPaired, setIsPaired] = useState(false);
 
+  // Local model detection state
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaDetecting, setOllamaDetecting] = useState(false);
+  const [lmstudioBaseUrl, setLmstudioBaseUrl] = useState("http://localhost:1234");
+  const [lmstudioModels, setLmstudioModels] = useState<string[]>([]);
+  const [lmstudioDetecting, setLmstudioDetecting] = useState(false);
+  const [localBaseUrl, setLocalBaseUrl] = useState("http://localhost:8080");
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const [localDetecting, setLocalDetecting] = useState(false);
+
+  // OpenClaw latest features
+  const [thinkingLevel, setThinkingLevel] = useState("adaptive");
+
+  // Messaging channel state
+  const [messagingChannel, setMessagingChannel] = useState<"none" | "telegram" | "whatsapp">("telegram");
+  const [whatsappDmPolicy, setWhatsappDmPolicy] = useState("allowlist");
+  const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState("");
+  const [whatsappPhoneSubmitted, setWhatsappPhoneSubmitted] = useState(false);
+  const [whatsappQrDataUrl, setWhatsappQrDataUrl] = useState("");
+  const [whatsappPaired, setWhatsappPaired] = useState(false);
+  const [whatsappQrStep, setWhatsappQrStep] = useState(false);
+  const [whatsappQrLoading, setWhatsappQrLoading] = useState(false);
+
+
+  // Config validation
+  const [validateOutput, setValidateOutput] = useState("");
+  const [validating, setValidating] = useState(false);
+
+
   const availableSkills = AVAILABLE_SKILLS;
 
   // Apply agent type preset - sets all relevant state from a preset
@@ -225,15 +265,15 @@ function App() {
     if (step === 17) {
       const checkPairing = async () => {
         try {
-           const remoteConfig = targetEnvironment === "cloud" ? {
-             ip: remoteIp,
-             user: remoteUser,
-             password: remotePassword || null,
-             privateKeyPath: remotePrivateKeyPath || null
-           } : null;
-           const status: boolean = await invoke("check_pairing_status", { remote: remoteConfig });
-           if (status) setIsPaired(true);
-        } catch(e) { console.error("Failed to check pairing status:", e); }
+          const remoteConfig = targetEnvironment === "cloud" ? {
+            ip: remoteIp,
+            user: remoteUser,
+            password: remotePassword || null,
+            privateKeyPath: remotePrivateKeyPath || null
+          } : null;
+          const status: boolean = await invoke("check_pairing_status", { remote: remoteConfig });
+          if (status) setIsPaired(true);
+        } catch (e) { console.error("Failed to check pairing status:", e); }
       };
       checkPairing();
     }
@@ -298,7 +338,7 @@ function App() {
         password: remotePassword || null,
         privateKeyPath: remotePrivateKeyPath || null
       };
-      
+
       const res: any = await invoke("check_remote_prerequisites", { remote });
       setChecks({
         node: res.node_installed,
@@ -398,7 +438,7 @@ function App() {
       });
 
       // Timeout after 15 seconds
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Connection timed out")), 15000)
       );
 
@@ -459,7 +499,32 @@ function App() {
     return true;
   }
 
-  // Helper to transform the loaded config (from get_current_config) 
+  // Normalize a config payload so that null fields that the backend treats as
+  // "use default" compare equal to their UI-default counterparts.  This is needed
+  // because a basic-mode deploy sends null for security/session fields, but when
+  // the user later visits advanced settings (mode="advanced") those same fields are
+  // emitted with their useState defaults by constructConfigPayload().
+  function normalizeForComparison(payload: any) {
+    if (!payload) return payload;
+    const effectiveToolsMode = payload.tools_mode ?? "allowlist";
+    return {
+      ...payload,
+      sandbox_mode: payload.sandbox_mode ?? "off",
+      tools_mode: effectiveToolsMode,
+      allowed_tools: effectiveToolsMode === "allowlist"
+        ? (payload.allowed_tools ?? ["filesystem", "terminal", "browser"])
+        : payload.allowed_tools,
+      denied_tools: effectiveToolsMode === "denylist"
+        ? (payload.denied_tools ?? [])
+        : null,
+      heartbeat_mode: payload.heartbeat_mode ?? "1h",
+      idle_timeout_ms: (payload.heartbeat_mode ?? "1h") === "idle"
+        ? payload.idle_timeout_ms
+        : null,
+    };
+  }
+
+  // Helper to transform the loaded config (from get_current_config)
   // into the structure expected by configure_agent, for comparison.
   function transformInitialToPayload(initial: any) {
     if (!initial) return null;
@@ -522,6 +587,12 @@ Managed by Clawnetes.`,
       memory_md: initial.memory_md || null,
       memory_enabled: initial.memory_enabled || false,
       cron_jobs: initial.cron_jobs || null,
+      local_base_url: initial.local_base_url || null,
+      thinking_level: initial.thinking_level || null,
+      // WhatsApp channel
+      whatsapp_enabled: initial.whatsapp_enabled || false,
+      whatsapp_dm_policy: initial.whatsapp_dm_policy || null,
+      whatsapp_phone_number: initial.whatsapp_phone_number || "",
     };
   }
 
@@ -537,64 +608,72 @@ Managed by Clawnetes.`;
     const usePresetFields = isPresetAgent || mode === "advanced";
 
     return {
-        provider,
-        api_key: apiKey,
-        auth_method: authMethod,
-        model,
-        user_name: userName,
-        agent_name: agentName,
-        agent_vibe: "",
-        telegram_token: telegramToken,
-        gateway_port: gatewayPort,
-        gateway_bind: gatewayBind,
-        gateway_auth_mode: gatewayAuthMode,
-        tailscale_mode: tailscaleMode,
-        node_manager: nodeManager,
-        skills: selectedSkills,
-        service_keys: serviceKeys,
-        sandbox_mode: usePresetFields ? mappedSandboxMode : null,
-        tools_mode: usePresetFields ? toolsMode : null,
-        allowed_tools: usePresetFields && toolsMode === "allowlist" ? allowedTools : null,
-        denied_tools: usePresetFields && toolsMode === "denylist" ? deniedTools : null,
-        fallback_models: usePresetFields && enableFallbacks ? fallbackModels.filter(m => m) : null,
-        heartbeat_mode: usePresetFields ? heartbeatMode : null,
-        idle_timeout_ms: usePresetFields && heartbeatMode === "idle" ? idleTimeoutMs : null,
-        identity_md: (usePresetFields && identityMd) ? identityMd : defaultIdentity,
-        user_md: usePresetFields && userMd ? userMd : null,
-        soul_md: usePresetFields && soulMd ? soulMd : null,
-        agents: enableMultiAgent ? agentConfigs.map(a => ({
-          id: a.id,
-          name: a.name,
-          model: a.model,
-          fallback_models: a.fallbackModels.length > 0 ? a.fallbackModels : null,
-          skills: a.skills.length > 0 ? a.skills : null,
-          vibe: a.vibe,
-          identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
+      provider,
+      api_key: apiKey,
+      auth_method: authMethod,
+      model,
+      user_name: userName,
+      agent_name: agentName,
+      agent_vibe: "",
+      telegram_token: telegramToken,
+      gateway_port: gatewayPort,
+      gateway_bind: gatewayBind,
+      gateway_auth_mode: gatewayAuthMode,
+      tailscale_mode: tailscaleMode,
+      node_manager: nodeManager,
+      skills: selectedSkills,
+      service_keys: serviceKeys,
+      sandbox_mode: usePresetFields ? mappedSandboxMode : null,
+      tools_mode: usePresetFields ? toolsMode : null,
+      allowed_tools: usePresetFields && toolsMode === "allowlist" ? allowedTools : null,
+      denied_tools: usePresetFields && toolsMode === "denylist" ? deniedTools : null,
+      fallback_models: usePresetFields && enableFallbacks ? fallbackModels.filter(m => m) : null,
+      heartbeat_mode: usePresetFields ? heartbeatMode : null,
+      idle_timeout_ms: usePresetFields && heartbeatMode === "idle" ? idleTimeoutMs : null,
+      identity_md: (usePresetFields && identityMd) ? identityMd : defaultIdentity,
+      user_md: usePresetFields && userMd ? userMd : null,
+      soul_md: usePresetFields && soulMd ? soulMd : null,
+      agents: enableMultiAgent ? agentConfigs.map(a => ({
+        id: a.id,
+        name: a.name,
+        model: a.model,
+        fallback_models: a.fallbackModels.length > 0 ? a.fallbackModels : null,
+        skills: a.skills.length > 0 ? a.skills : null,
+        vibe: a.vibe,
+        identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
 - **Name:** ${a.name}
 - **Emoji:** ${a.emoji || "🦞"}
 ---
 Managed by Clawnetes.`,
-          user_md: a.userMd || null,
-          soul_md: a.soulMd || null,
-          tools_md: a.toolsMd || null,
-          agents_md: a.agentsMd || null,
-        })) : null,
-        preserve_state: isPaired,
-        // New preset fields
-        agent_type: agentType,
-        tools_md: usePresetFields && toolsMd ? toolsMd : null,
-        agents_md: usePresetFields && agentsMd ? agentsMd : null,
-        heartbeat_md: usePresetFields && heartbeatMd ? heartbeatMd : null,
-        memory_md: usePresetFields && memoryMd ? memoryMd : null,
-        memory_enabled: usePresetFields ? memoryEnabled : false,
-        cron_jobs: cronJobs.length > 0 ? cronJobs : null,
+        user_md: a.userMd || null,
+        soul_md: a.soulMd || null,
+        tools_md: a.toolsMd || null,
+        agents_md: a.agentsMd || null,
+      })) : null,
+      preserve_state: isPaired,
+      // New preset fields
+      agent_type: agentType,
+      tools_md: usePresetFields && toolsMd ? toolsMd : null,
+      agents_md: usePresetFields && agentsMd ? agentsMd : null,
+      heartbeat_md: usePresetFields && heartbeatMd ? heartbeatMd : null,
+      memory_md: usePresetFields && memoryMd ? memoryMd : null,
+      memory_enabled: usePresetFields ? memoryEnabled : false,
+      cron_jobs: cronJobs.length > 0 ? cronJobs : null,
+      // Local model support
+      local_base_url: provider === "local" ? localBaseUrl : (provider === "lmstudio" ? lmstudioBaseUrl : null),
+      // OpenClaw latest features
+      thinking_level: (provider === "anthropic" && (model.includes("claude-") && model.includes("-4"))) ? thinkingLevel : null,
+      // WhatsApp channel
+      whatsapp_enabled: messagingChannel === "whatsapp",
+      whatsapp_dm_policy: messagingChannel === "whatsapp" ? whatsappDmPolicy : null,
+      whatsapp_phone_number: messagingChannel === "whatsapp" ? whatsappPhoneNumber : null,
     };
   }
 
   async function handleInstall() {
     setLoading(true);
     setError(false);
-    
+
     const isUpdate = !!initialConfigRef.current;
     setProgress(isUpdate ? "Applying changes..." : "Starting setup...");
 
@@ -624,15 +703,15 @@ Managed by Clawnetes.`,
     configPayload.preserve_state = actualIsPaired;
 
     if (initialConfigRef.current) {
-        const initialPayload = transformInitialToPayload(initialConfigRef.current);
-        if (isDeepEqual(initialPayload, configPayload)) {
-             setProgress("Configuration unchanged.");
-             setTimeout(() => {
-                 setLoading(false);
-                 setStep(17);
-             }, 500);
-             return;
-        }
+      const initialPayload = transformInitialToPayload(initialConfigRef.current);
+      if (isDeepEqual(normalizeForComparison(initialPayload), normalizeForComparison(configPayload))) {
+        setProgress("Configuration unchanged.");
+        setTimeout(() => {
+          setLoading(false);
+          setStep(17);
+        }, 500);
+        return;
+      }
     }
 
     try {
@@ -689,9 +768,9 @@ Managed by Clawnetes.`,
           setProgress("");
           const errStr = String(e);
           if (errStr.includes("Backend update pending")) {
-             setLogs("Error: " + errStr);
+            setLogs("Error: " + errStr);
           } else {
-             setLogs("Error: Tunnel verification failed - " + errStr);
+            setLogs("Error: Tunnel verification failed - " + errStr);
           }
           setError(true);
           setTunnelActive(false);
@@ -716,12 +795,13 @@ Managed by Clawnetes.`,
         setStep(17);
       } else {
         // Local installation flow
-        setProgress("Installing OpenClaw (this may take a minute)...");
-        setLogs("Installing OpenClaw (this may take a minute)...");
         if (!checks.openclaw) {
+          setProgress("Installing OpenClaw (this may take a minute)...");
+          setLogs("Installing OpenClaw (this may take a minute)...");
           await invoke("install_openclaw");
           const version: string = await invoke("get_openclaw_version");
           setOpenClawVersion(version);
+          setChecks(prev => ({ ...prev, openclaw: true }));
         }
 
         setProgress("Configuring agent...");
@@ -742,9 +822,15 @@ Managed by Clawnetes.`,
           }
         }
 
-        setProgress("Starting Gateway (this may take 20-30 seconds)...");
-        setLogs("Starting Gateway...");
-        await invoke("start_gateway");
+        if (isUpdate || messagingChannel === "whatsapp") {
+          setProgress("Restarting Gateway (this may take 20-30 seconds)...");
+          setLogs("Restarting Gateway...");
+          await invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null });
+        } else {
+          setProgress("Starting Gateway (this may take 20-30 seconds)...");
+          setLogs("Starting Gateway...");
+          await invoke("start_gateway");
+        }
 
         setProgress("Finalizing setup...");
         if (!actualIsPaired) {
@@ -819,11 +905,11 @@ Managed by Clawnetes.`,
         setMaintenanceStatus(`✅ Security Audit completed successfully.`);
       } else if (action === "update") {
         if (remoteConfig) {
-           res = await invoke("update_remote_openclaw", { remote: remoteConfig });
-           setMaintenanceStatus(`✅ Remote OpenClaw updated.`);
+          res = await invoke("update_remote_openclaw", { remote: remoteConfig });
+          setMaintenanceStatus(`✅ Remote OpenClaw updated.`);
         } else {
-           res = await invoke("install_openclaw"); // Re-run install to update
-           setMaintenanceStatus(`✅ OpenClaw updated.`);
+          res = await invoke("install_openclaw"); // Re-run install to update
+          setMaintenanceStatus(`✅ OpenClaw updated.`);
         }
       } else {
         res = remoteConfig
@@ -855,7 +941,7 @@ Managed by Clawnetes.`,
 
       const config: any = await invoke("get_current_config", { remote: remoteConfig });
       initialConfigRef.current = config;
-      
+
       // Populate state
       setProvider(config.provider);
       setApiKey(config.api_key);
@@ -866,28 +952,28 @@ Managed by Clawnetes.`,
       setAgentEmoji(config.agent_emoji || "🦞");
       setAgentType(config.agent_type || "custom");
       setTelegramToken(config.telegram_token);
-      
+
       setGatewayPort(config.gateway_port);
       setGatewayBind(config.gateway_bind);
       setGatewayAuthMode(config.gateway_auth_mode);
       setTailscaleMode(config.tailscale_mode);
       setNodeManager(config.node_manager);
-      
+
       setSelectedSkills(config.skills);
       // Service keys might be partial, merge them?
       setServiceKeys(config.service_keys);
-      
+
       setSandboxMode(config.sandbox_mode);
       setToolsMode(config.tools_mode);
       setAllowedTools(config.allowed_tools);
       setDeniedTools(config.denied_tools);
-      
+
       setFallbackModels(config.fallback_models);
       setEnableFallbacks(config.fallback_models.length > 0);
-      
+
       setHeartbeatMode(config.heartbeat_mode);
       setIdleTimeoutMs(config.idle_timeout_ms);
-      
+
       setIdentityMd(config.identity_md);
       setUserMd(config.user_md);
       setSoulMd(config.soul_md);
@@ -905,25 +991,39 @@ Managed by Clawnetes.`,
       if (config.memory_enabled !== undefined) setMemoryEnabled(config.memory_enabled);
       if (config.cron_jobs) setCronJobs(config.cron_jobs);
 
+      // Load new fields
+      if (config.whatsapp_enabled) {
+        setMessagingChannel("whatsapp");
+        setWhatsappPaired(true);       // already connected; skip QR re-pairing
+        setWhatsappPhoneSubmitted(true);
+      } else if (config.telegram_token) setMessagingChannel("telegram");
+      if (config.whatsapp_phone_number) setWhatsappPhoneNumber(config.whatsapp_phone_number);
+      if (config.whatsapp_dm_policy) setWhatsappDmPolicy(config.whatsapp_dm_policy);
+      if (config.thinking_level) setThinkingLevel(config.thinking_level);
+      if (config.local_base_url) {
+        if (config.provider === "lmstudio") setLmstudioBaseUrl(config.local_base_url);
+        else if (config.provider === "local") setLocalBaseUrl(config.local_base_url);
+      }
+
       setEnableMultiAgent(config.enable_multi_agent);
       if (config.enable_multi_agent && config.agent_configs) {
-          setNumAgents(config.agent_configs.length);
-          setAgentConfigs(config.agent_configs.map((a: any) => ({
-              id: a.id,
-              name: a.name,
-              model: a.model,
-              fallbackModels: a.fallback_models || [],
-              skills: a.skills || [],
-              vibe: a.vibe,
-              emoji: a.emoji || "🦞",
-              identityMd: a.identity_md || "",
-              userMd: a.user_md || "",
-              soulMd: a.soul_md || "",
-              toolsMd: a.tools_md || "",
-              agentsMd: a.agents_md || "",
-              allowedTools: a.allowed_tools || [],
-              cronJobs: a.cron_jobs || [],
-          })));
+        setNumAgents(config.agent_configs.length);
+        setAgentConfigs(config.agent_configs.map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          model: a.model,
+          fallbackModels: a.fallback_models || [],
+          skills: a.skills || [],
+          vibe: a.vibe,
+          emoji: a.emoji || "🦞",
+          identityMd: a.identity_md || "",
+          userMd: a.user_md || "",
+          soulMd: a.soul_md || "",
+          toolsMd: a.tools_md || "",
+          agentsMd: a.agents_md || "",
+          allowedTools: a.allowed_tools || [],
+          cronJobs: a.cron_jobs || [],
+        })));
       }
 
       if (config.is_paired !== undefined) {
@@ -955,11 +1055,11 @@ Managed by Clawnetes.`,
     } else {
       setMaintenanceStatus("Establishing SSH tunnel...");
       try {
-        const remote = { 
-          ip: remoteIp, 
-          user: remoteUser, 
-          password: remotePassword || null, 
-          privateKeyPath: remotePrivateKeyPath || null 
+        const remote = {
+          ip: remoteIp,
+          user: remoteUser,
+          password: remotePassword || null,
+          privateKeyPath: remotePrivateKeyPath || null
         };
         await invoke("start_ssh_tunnel", { remote });
         setTunnelActive(true);
@@ -972,7 +1072,7 @@ Managed by Clawnetes.`,
   }
 
   const toggleSkill = (id: string) => {
-    setSelectedSkills(prev => 
+    setSelectedSkills(prev =>
       prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
     );
   };
@@ -1000,10 +1100,10 @@ Managed by Clawnetes.`,
             </p>
 
             {/* Quick Action Buttons */}
-            <div className="button-group" style={{gap: "10px", marginBottom: "2rem"}}>
+            <div className="button-group" style={{ gap: "10px", marginBottom: "2rem" }}>
               <button
                 className="primary"
-                style={{flex: 1}}
+                style={{ flex: 1 }}
                 onClick={async () => {
                   try {
                     const url: string = await invoke("get_dashboard_url", {
@@ -1028,7 +1128,7 @@ Managed by Clawnetes.`,
               {targetEnvironment === "cloud" && (
                 <button
                   className="secondary"
-                  style={{flex: 1}}
+                  style={{ flex: 1 }}
                   onClick={async () => {
                     if (tunnelActive) {
                       // Stop tunnel
@@ -1087,8 +1187,8 @@ Managed by Clawnetes.`,
             </div>
 
             {/* Maintenance Options */}
-            <h3 style={{marginBottom: "1rem"}}>Maintenance Options</h3>
-            <div className="mode-card-container" style={{gridTemplateColumns: "1fr", gap: "1rem"}}>
+            <h3 style={{ marginBottom: "1rem" }}>Maintenance Options</h3>
+            <div className="mode-card-container" style={{ gridTemplateColumns: "1fr", gap: "1rem" }}>
               <div
                 className={`mode-card ${selectedMaint === "repair" ? "active" : ""}`}
                 onClick={() => !loading && setSelectedMaint("repair")}
@@ -1105,8 +1205,8 @@ Managed by Clawnetes.`,
                 <p>Run <code>openclaw security audit --fix</code> to audit and tighten system permissions.</p>
               </div>
 
-              <div 
-                className={`mode-card ${selectedMaint === "update" ? "active" : ""}`} 
+              <div
+                className={`mode-card ${selectedMaint === "update" ? "active" : ""}`}
                 onClick={() => !loading && setSelectedMaint("update")}
               >
                 <h3>🚀 Upgrade OpenClaw Version</h3>
@@ -1123,27 +1223,27 @@ Managed by Clawnetes.`,
 
               <div
                 className={`mode-card ${selectedMaint === "uninstall" ? "active" : ""}`}
-                style={selectedMaint === "uninstall" ? {borderColor: "var(--error)", backgroundColor: "rgba(239, 68, 68, 0.05)"} : {}}
+                style={selectedMaint === "uninstall" ? { borderColor: "var(--error)", backgroundColor: "rgba(239, 68, 68, 0.05)" } : {}}
                 onClick={() => !loading && setSelectedMaint("uninstall")}
               >
-                <h3 style={selectedMaint === "uninstall" ? {color: "var(--error)"} : {}}>🗑 Uninstall Completely</h3>
+                <h3 style={selectedMaint === "uninstall" ? { color: "var(--error)" } : {}}>🗑 Uninstall Completely</h3>
                 <p>Remove the OpenClaw CLI and all {targetEnvironment === "local" ? "local" : "remote"} configuration/data files.</p>
               </div>
             </div>
 
             {!loading && (
-              <div className="button-group" style={{gap: "10px", marginTop: "1.5rem"}}>
+              <div className="button-group" style={{ gap: "10px", marginTop: "1.5rem" }}>
                 <button
                   className="primary"
-                  style={{flex: 1}}
+                  style={{ flex: 1 }}
                   onClick={async () => {
                     if (selectedMaint === "reconfigure") {
                       // Load existing config first
                       const loaded = await loadExistingConfig();
                       if (loaded) {
-                         // Go to Configuration Mode (Step 3 or 5 depending on preference)
-                         // Step 3 is security check, usually good to show again.
-                         setMode("advanced"); setStep(6); 
+                        // Go to Configuration Mode (Step 3 or 5 depending on preference)
+                        // Step 3 is security check, usually good to show again.
+                        setMode("advanced"); setStep(6);
                       }
                     } else if (selectedMaint === "uninstall") {
                       if (confirm("Are you absolutely sure you want to completely remove OpenClaw and all its data?")) {
@@ -1158,14 +1258,14 @@ Managed by Clawnetes.`,
                   Confirm Action
                 </button>
                 {maintCompleted && (
-                  <button className="secondary" style={{flex: 1}} onClick={() => invoke("close_app")}>Exit Setup</button>
+                  <button className="secondary" style={{ flex: 1 }} onClick={() => invoke("close_app")}>Exit Setup</button>
                 )}
               </div>
             )}
 
             {maintenanceStatus && (
-              <div className="progress-container" style={{marginTop: "2rem"}}>
-                <p style={{fontSize: "0.9rem", color: maintenanceStatus.includes("❌") ? "var(--error)" : maintenanceStatus.includes("✅") ? "var(--success)" : "var(--primary)"}}>{maintenanceStatus}</p>
+              <div className="progress-container" style={{ marginTop: "2rem" }}>
+                <p style={{ fontSize: "0.9rem", color: maintenanceStatus.includes("❌") ? "var(--error)" : maintenanceStatus.includes("✅") ? "var(--success)" : "var(--primary)" }}>{maintenanceStatus}</p>
                 <div className="logs-container">
                   <pre>{logs}</pre>
                 </div>
@@ -1181,10 +1281,10 @@ Managed by Clawnetes.`,
             <p className="welcome-text">
               The fastest way to deploy your AI agent. Get started in minutes.
             </p>
-            <div className="button-group" style={{justifyContent: "center"}}>
-              <button 
-                className="primary" 
-                style={{minWidth: "200px", padding: "1rem 2rem", fontSize: "1.1rem"}}
+            <div className="button-group" style={{ justifyContent: "center" }}>
+              <button
+                className="primary"
+                style={{ minWidth: "200px", padding: "1rem 2rem", fontSize: "1.1rem" }}
                 onClick={() => setStep(1)}
               >
                 Start Setup
@@ -1212,8 +1312,8 @@ Managed by Clawnetes.`,
             </div>
 
             {targetEnvironment === "cloud" && (
-              <div className="remote-config" style={{marginTop: "2rem"}}>
-                <h3 style={{marginBottom: "1rem"}}>SSH Configuration</h3>
+              <div className="remote-config" style={{ marginTop: "2rem" }}>
+                <h3 style={{ marginBottom: "1rem" }}>SSH Configuration</h3>
                 <div className="form-group">
                   <label>Server IP Address</label>
                   <input
@@ -1235,12 +1335,12 @@ Managed by Clawnetes.`,
                 </div>
                 <div className="form-group">
                   <label>SSH Private Key (Optional)</label>
-                  <div style={{display: "flex", gap: "0.5rem"}}>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
                     <input
                       placeholder="/Users/you/.ssh/id_rsa"
                       value={remotePrivateKeyPath}
                       onChange={(e) => setRemotePrivateKeyPath(e.target.value)}
-                      style={{flex: 1}}
+                      style={{ flex: 1 }}
                     />
                     <button
                       className="secondary"
@@ -1275,26 +1375,26 @@ Managed by Clawnetes.`,
                   className="secondary"
                   onClick={handleSshCheck}
                   disabled={!remoteIp || !remoteUser || sshStatus === "checking"}
-                  style={{width: "100%", marginTop: "1rem"}}
+                  style={{ width: "100%", marginTop: "1rem" }}
                 >
                   {sshStatus === "checking" ? "Testing..." : "Test Connection"}
                 </button>
 
                 {sshStatus === "success" && (
-                  <div style={{marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(34, 197, 94, 0.1)", borderRadius: "8px", border: "1px solid rgba(34, 197, 94, 0.3)"}}>
-                    <strong style={{color: "rgb(34, 197, 94)"}}>✅ Success:</strong> <span style={{color: "var(--text)"}}>SSH connection established successfully!</span>
+                  <div style={{ marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(34, 197, 94, 0.1)", borderRadius: "8px", border: "1px solid rgba(34, 197, 94, 0.3)" }}>
+                    <strong style={{ color: "rgb(34, 197, 94)" }}>✅ Success:</strong> <span style={{ color: "var(--text)" }}>SSH connection established successfully!</span>
                   </div>
                 )}
 
                 {sshError && (
-                  <div className="error" style={{marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.3)"}}>
-                    <strong style={{color: "rgb(239, 68, 68)"}}>❌ Error:</strong> <span style={{color: "var(--text)"}}>{sshError}</span>
+                  <div className="error" style={{ marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                    <strong style={{ color: "rgb(239, 68, 68)" }}>❌ Error:</strong> <span style={{ color: "var(--text)" }}>{sshError}</span>
                   </div>
                 )}
               </div>
             )}
 
-            <div className="button-group" style={{marginTop: "2rem"}}>
+            <div className="button-group" style={{ marginTop: "2rem" }}>
               <button
                 className="primary"
                 onClick={async () => {
@@ -1336,30 +1436,30 @@ Managed by Clawnetes.`,
               OpenClaw {checks.openclaw ? "Installed" : "Ready to install"} {targetEnvironment === "cloud" && `(on ${remoteIp})`}
             </div>
             {!checks.node && (
-              <div className="error" style={{marginTop: "1rem", color: "var(--error)"}}>
+              <div className="error" style={{ marginTop: "1rem", color: "var(--error)" }}>
                 <p>Node.js is required.</p>
                 {targetEnvironment === "local" && (
-                   <div style={{display: "flex", gap: "10px", alignItems: "center", marginTop: "5px"}}>
-                     <button
-                       className="secondary small"
-                       onClick={installLocalNode}
-                       disabled={installingNode}
-                       style={{padding: "4px 10px", fontSize: "0.8rem", cursor: "pointer"}}
-                     >
-                       {installingNode ? "Installing..." : "Install Now"}
-                     </button>
-                     {nodeInstallError && <span style={{fontSize: "0.8rem"}}>{nodeInstallError}</span>}
-                   </div>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "5px" }}>
+                    <button
+                      className="secondary small"
+                      onClick={installLocalNode}
+                      disabled={installingNode}
+                      style={{ padding: "4px 10px", fontSize: "0.8rem", cursor: "pointer" }}
+                    >
+                      {installingNode ? "Installing..." : "Install Now"}
+                    </button>
+                    {nodeInstallError && <span style={{ fontSize: "0.8rem" }}>{nodeInstallError}</span>}
+                  </div>
                 )}
                 {targetEnvironment === "cloud" && (
-                   <p>It will be installed automatically in the Setup step.</p>
+                  <p>It will be installed automatically in the Setup step.</p>
                 )}
               </div>
             )}
             <div className="button-group">
-              <button 
-                className="primary" 
-                disabled={targetEnvironment === "local" && !checks.node} 
+              <button
+                className="primary"
+                disabled={targetEnvironment === "local" && !checks.node}
                 onClick={() => setStep(3)}
               >
                 Continue
@@ -1378,7 +1478,7 @@ Managed by Clawnetes.`,
               <p>A malicious prompt could potentially trick the agent into performing unsafe actions. We recommend running it in a sandboxed environment if possible.</p>
               <p>Keep your API keys secure and never share your gateway token.</p>
             </div>
-            <p style={{fontWeight: 600}}>Do you understand the risks and wish to continue?</p>
+            <p style={{ fontWeight: 600 }}>Do you understand the risks and wish to continue?</p>
             <div className="button-group">
               <button className="primary" onClick={() => setStep(5)}>I Understand</button>
               <button className="secondary" onClick={() => setStep(2)}>Back</button>
@@ -1392,14 +1492,14 @@ Managed by Clawnetes.`,
             <p className="step-description">What should the agent call you?</p>
             <div className="form-group">
               <label>Your Name</label>
-              <input 
-                autoFocus 
-                autoCapitalize="none" 
-                autoCorrect="off" 
-                spellCheck="false" 
-                autoComplete="off" 
-                placeholder="e.g. David" 
-                value={userName} 
+              <input
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
+                autoComplete="off"
+                placeholder="e.g. David"
+                value={userName}
                 onChange={(e) => {
                   const val = e.target.value;
                   setUserName(val);
@@ -1409,7 +1509,7 @@ Managed by Clawnetes.`,
                   if (soulMd) {
                     setSoulMd(updateSoulMission(soulMd, val));
                   }
-                }} 
+                }}
               />
             </div>
             <div className="button-group">
@@ -1435,9 +1535,9 @@ Managed by Clawnetes.`,
             </div>
             <div className="form-group">
               <label>Agent Emoji</label>
-              <div className="emoji-grid" style={{display: "flex", gap: "0.5rem", flexWrap: "wrap"}}>
+              <div className="emoji-grid" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                 {EMOJI_OPTIONS.map(e => (
-                  <button 
+                  <button
                     key={e}
                     className={`emoji-btn`}
                     onClick={() => {
@@ -1447,9 +1547,9 @@ Managed by Clawnetes.`,
                       }
                     }}
                     style={{
-                      fontSize: "1.25rem", 
-                      padding: "0.4rem", 
-                      borderRadius: "8px", 
+                      fontSize: "1.25rem",
+                      padding: "0.4rem",
+                      borderRadius: "8px",
                       border: agentEmoji === e ? "2px solid var(--primary)" : "1px solid var(--border)",
                       background: agentEmoji === e ? "rgba(255, 59, 48, 0.08)" : "var(--bg-card)",
                       cursor: "pointer",
@@ -1472,7 +1572,7 @@ Managed by Clawnetes.`,
           <div className="step-view">
             <h2>Agent Type</h2>
             <p className="step-description">Choose a pre-configured agent type or build your own from scratch.</p>
-            <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem"}}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
               {[
                 { id: "coding-assistant" as AgentTypeId, name: "Coding Assistant", emoji: "👨‍💻", desc: "A senior software engineer that writes clean, secure code." },
                 { id: "office-assistant" as AgentTypeId, name: "Office Assistant", emoji: "🤵", desc: "A professional executive assistant for email, tasks, and comms." },
@@ -1494,13 +1594,13 @@ Managed by Clawnetes.`,
                     textAlign: "center"
                   }}
                 >
-                  <div style={{fontSize: "2rem", marginBottom: "0.5rem"}}>{t.emoji}</div>
-                  <div style={{fontWeight: 600, marginBottom: "0.25rem"}}>{t.name}</div>
-                  <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>{t.desc}</div>
+                  <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>{t.emoji}</div>
+                  <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>{t.name}</div>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{t.desc}</div>
                 </div>
               ))}
             </div>
-            <div className="button-group" style={{marginTop: "1.5rem"}}>
+            <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" onClick={() => {
                 if (isPresetAgent) {
                   setStep(6.7);
@@ -1520,29 +1620,29 @@ Managed by Clawnetes.`,
             <p className="step-description">Your {presetData?.name || "agent"} is pre-configured with these settings. Enter your API key to continue.</p>
 
             {presetData && (
-              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.5rem"}}>
-                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
-                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Model</div>
-                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.model.split("/").pop()}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.5rem" }}>
+                <div className="status-card" style={{ padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>Model</div>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{presetData.model.split("/").pop()}</div>
                 </div>
-                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
-                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Fallback</div>
-                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.fallbackModels[0]?.split("/").pop() || "None"}</div>
+                <div className="status-card" style={{ padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>Fallback</div>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{presetData.fallbackModels[0]?.split("/").pop() || "None"}</div>
                 </div>
-                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
-                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Skills</div>
-                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.skills.length} configured</div>
+                <div className="status-card" style={{ padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>Skills</div>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{presetData.skills.length} configured</div>
                 </div>
-                <div className="status-card" style={{padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)"}}>
-                  <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem"}}>Heartbeat</div>
-                  <div style={{fontWeight: 600, fontSize: "0.9rem"}}>{presetData.heartbeatMode === "never" ? "Disabled" : `Every ${presetData.heartbeatMode}`}</div>
+                <div className="status-card" style={{ padding: "1rem", borderRadius: "8px", backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>Heartbeat</div>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{presetData.heartbeatMode === "never" ? "Disabled" : `Every ${presetData.heartbeatMode}`}</div>
                 </div>
               </div>
             )}
 
             <div className="form-group">
               <label>Skills Included</label>
-              <div style={{display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.25rem"}}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.25rem" }}>
                 {selectedSkills.map(s => (
                   <span key={s} style={{
                     padding: "0.25rem 0.75rem",
@@ -1552,14 +1652,14 @@ Managed by Clawnetes.`,
                     fontSize: "0.8rem",
                     fontWeight: 500
                   }}>
-                    {SKILL_ICONS[s] && <img src={SKILL_ICONS[s]} alt="" style={{width: "14px", height: "14px", marginRight: "4px", verticalAlign: "middle", borderRadius: "3px"}} />}
+                    {SKILL_ICONS[s] && <img src={SKILL_ICONS[s]} alt="" style={{ width: "14px", height: "14px", marginRight: "4px", verticalAlign: "middle", borderRadius: "3px" }} />}
                     {s}
                   </span>
                 ))}
               </div>
             </div>
 
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>AI Provider API Key</label>
               <input
                 type="password"
@@ -1568,7 +1668,7 @@ Managed by Clawnetes.`,
                 placeholder={`Enter your ${provider} API key`}
                 autoComplete="off"
               />
-              <p className="input-hint" style={{marginTop: "0.25rem", fontSize: "0.8rem"}}>
+              <p className="input-hint" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
                 Required for {provider}. Get one from the provider's dashboard.
               </p>
             </div>
@@ -1578,30 +1678,30 @@ Managed by Clawnetes.`,
               const skill = availableSkills.find(sk => sk.id === s);
               return skill?.requiresAuth;
             }).length > 0 && (
-              <div className="form-group" style={{marginTop: "1rem"}}>
-                <label>Skill API Keys (Optional)</label>
-                {selectedSkills.filter(s => {
-                  const skill = availableSkills.find(sk => sk.id === s);
-                  return skill?.requiresAuth;
-                }).map(s => {
-                  const skill = availableSkills.find(sk => sk.id === s)!;
-                  return (
-                    <div key={s} style={{marginTop: "0.5rem"}}>
-                      <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>{skill.name}</label>
-                      <input
-                        type="password"
-                        value={serviceKeys[s] || ""}
-                        onChange={(e) => setServiceKeys({...serviceKeys, [s]: e.target.value})}
-                        placeholder={skill.authPlaceholder || "API Key"}
-                        autoComplete="off"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                <div className="form-group" style={{ marginTop: "1rem" }}>
+                  <label>Skill API Keys (Optional)</label>
+                  {selectedSkills.filter(s => {
+                    const skill = availableSkills.find(sk => sk.id === s);
+                    return skill?.requiresAuth;
+                  }).map(s => {
+                    const skill = availableSkills.find(sk => sk.id === s)!;
+                    return (
+                      <div key={s} style={{ marginTop: "0.5rem" }}>
+                        <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{skill.name}</label>
+                        <input
+                          type="password"
+                          value={serviceKeys[s] || ""}
+                          onChange={(e) => setServiceKeys({ ...serviceKeys, [s]: e.target.value })}
+                          placeholder={skill.authPlaceholder || "API Key"}
+                          autoComplete="off"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-            <div className="button-group" style={{marginTop: "1.5rem"}}>
+            <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" disabled={!apiKey} onClick={() => setStep(9)}>Next</button>
               <button className="secondary" onClick={() => setStep(6.5)}>Back</button>
             </div>
@@ -1628,7 +1728,7 @@ Managed by Clawnetes.`,
                 ]}
               />
             </div>
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Auth Mode</label>
               <Dropdown
                 value={gatewayAuthMode}
@@ -1639,7 +1739,7 @@ Managed by Clawnetes.`,
                 ]}
               />
             </div>
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Tailscale</label>
               <Dropdown
                 value={tailscaleMode}
@@ -1663,7 +1763,7 @@ Managed by Clawnetes.`,
           <div className="step-view">
             <h2>Connect Brain</h2>
             <p className="step-description">Select your AI provider and authentication method.</p>
-            
+
             <div className="form-group">
               <label>AI Provider</label>
               <Dropdown
@@ -1683,11 +1783,14 @@ Managed by Clawnetes.`,
                   { value: "google-vertex", label: "Google Vertex AI", icon: PROVIDER_LOGOS["google-vertex"] },
                   { value: "openrouter", label: "OpenRouter", icon: PROVIDER_LOGOS["openrouter"] },
                   { value: "xai", label: "xAI (Grok)", icon: PROVIDER_LOGOS["xai"] },
+                  { value: "ollama", label: "Ollama (Local)", icon: PROVIDER_LOGOS["ollama"] },
+                  { value: "lmstudio", label: "LM Studio (Local)", icon: PROVIDER_LOGOS["lmstudio"] },
+                  { value: "local", label: "Custom Local Endpoint", icon: PROVIDER_LOGOS["local"] },
                 ]}
               />
             </div>
-            
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Auth Method</label>
               <Dropdown
                 value={authMethod}
@@ -1704,37 +1807,205 @@ Managed by Clawnetes.`,
                     { value: "token", label: "OpenAI API Key", description: "Standard API Key starting with sk-..." }
                   ] : []),
                   ...(!["anthropic", "google", "openai"].includes(provider) ? [
-                     { value: "token", label: "API Key (Standard)", description: "Standard API Key for this provider" }
+                    { value: "token", label: "API Key (Standard)", description: "Standard API Key for this provider" }
                   ] : [])
                 ]}
               />
             </div>
 
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+            {/* LM Studio base URL input */}
+            {provider === "lmstudio" && (
+              <div className="form-group" style={{ marginTop: "1.5rem" }}>
+                <label>LM Studio Base URL</label>
+                <input
+                  type="text"
+                  value={lmstudioBaseUrl}
+                  onChange={(e) => setLmstudioBaseUrl(e.target.value)}
+                  placeholder="http://localhost:1234"
+                />
+              </div>
+            )}
+
+            {/* Custom local endpoint URL input */}
+            {provider === "local" && (
+              <div className="form-group" style={{ marginTop: "1.5rem" }}>
+                <label>Local Endpoint Base URL</label>
+                <input
+                  type="text"
+                  value={localBaseUrl}
+                  onChange={(e) => setLocalBaseUrl(e.target.value)}
+                  placeholder="http://localhost:8080"
+                />
+              </div>
+            )}
+
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Primary Model</label>
+              {/* Ollama dynamic detection */}
+              {provider === "ollama" && (
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                  <button
+                    className="secondary"
+                    style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                    disabled={ollamaDetecting}
+                    onClick={async () => {
+                      setOllamaDetecting(true);
+                      try {
+                        const remoteConfig = targetEnvironment === "cloud" ? {
+                          ip: remoteIp, user: remoteUser,
+                          password: remotePassword || null,
+                          privateKeyPath: remotePrivateKeyPath || null
+                        } : null;
+                        const models: string[] = await invoke("get_ollama_models", { remote: remoteConfig });
+                        setOllamaModels(models);
+                        if (models.length > 0) setModel(`ollama/${models[0]}`);
+                      } catch (e) {
+                        console.error("Ollama detection failed:", e);
+                      }
+                      setOllamaDetecting(false);
+                    }}
+                  >
+                    {ollamaDetecting ? "Detecting..." : "Detect Models"}
+                  </button>
+                  {ollamaModels.length > 0 && (
+                    <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                      Found {ollamaModels.length} model(s)
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* LM Studio dynamic detection */}
+              {provider === "lmstudio" && (
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                  <button
+                    className="secondary"
+                    style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                    disabled={lmstudioDetecting}
+                    onClick={async () => {
+                      setLmstudioDetecting(true);
+                      try {
+                        const remoteConfig = targetEnvironment === "cloud" ? {
+                          ip: remoteIp, user: remoteUser,
+                          password: remotePassword || null,
+                          privateKeyPath: remotePrivateKeyPath || null
+                        } : null;
+                        const models: string[] = await invoke("get_lmstudio_models", {
+                          baseUrl: lmstudioBaseUrl,
+                          remote: remoteConfig
+                        });
+                        const prefixedModels = models.map(m => `lmstudio/${m}`);
+                        setLmstudioModels(prefixedModels);
+                        if (prefixedModels.length > 0) setModel(prefixedModels[0]);
+                      } catch (e) {
+                        console.error("LM Studio detection failed:", e);
+                      }
+                      setLmstudioDetecting(false);
+                    }}
+                  >
+                    {lmstudioDetecting ? "Detecting..." : "Detect Models"}
+                  </button>
+                  {lmstudioModels.length > 0 && (
+                    <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                      Found {lmstudioModels.length} model(s)
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Custom local endpoint detection */}
+              {provider === "local" && (
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                  <button
+                    className="secondary"
+                    style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                    disabled={localDetecting}
+                    onClick={async () => {
+                      setLocalDetecting(true);
+                      try {
+                        const remoteConfig = targetEnvironment === "cloud" ? {
+                          ip: remoteIp, user: remoteUser,
+                          password: remotePassword || null,
+                          privateKeyPath: remotePrivateKeyPath || null
+                        } : null;
+                        const models: string[] = await invoke("get_lmstudio_models", {
+                          baseUrl: localBaseUrl,
+                          remote: remoteConfig
+                        });
+                        setLocalModels(models);
+                        if (models.length > 0) setModel(`local/${models[0]}`);
+                      } catch (e) {
+                        console.error("Local endpoint detection failed:", e);
+                      }
+                      setLocalDetecting(false);
+                    }}
+                  >
+                    {localDetecting ? "Detecting..." : "Detect Models"}
+                  </button>
+                  {localModels.length > 0 && (
+                    <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                      Found {localModels.length} model(s)
+                    </span>
+                  )}
+                </div>
+              )}
               <Dropdown
                 value={model}
                 onChange={setModel}
                 searchable={MODELS_BY_PROVIDER[provider] ? MODELS_BY_PROVIDER[provider].length > 10 : false}
-                options={MODELS_BY_PROVIDER[provider]
-                  ? MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label, description: m.description }))
-                  : (provider === "ollama" ? [
-                      { value: "ollama/llama3.1", label: "Llama 3.1 (Local)" },
-                      { value: "ollama/deepseek-r1", label: "DeepSeek R1 (Local)" }
-                    ] : [
-                      { value: model, label: model }
-                    ])
+                options={
+                  provider === "ollama" && ollamaModels.length > 0
+                    ? ollamaModels.map(m => ({ value: `ollama/${m}`, label: m }))
+                    : provider === "lmstudio" && lmstudioModels.length > 0
+                      ? lmstudioModels.map(m => ({ value: m, label: m }))
+                      : provider === "local" && localModels.length > 0
+                        ? localModels.map(m => ({ value: `local/${m}`, label: m }))
+                        : MODELS_BY_PROVIDER[provider]
+                          ? MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label, description: m.description }))
+                          : [{ value: model, label: model }]
                 }
               />
+              {/* Manual model entry for local providers when detection fails */}
+              {(provider === "ollama" || provider === "lmstudio" || provider === "local") && (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <input
+                    type="text"
+                    placeholder={`Or type model name manually (e.g. ${provider === "ollama" ? "llama3.2" : "your-model-id"})`}
+                    style={{ fontSize: "0.85rem" }}
+                    onBlur={(e) => {
+                      const val = e.target.value.trim();
+                      if (val) setModel(provider === "lmstudio" ? val : `${provider}/${val}`);
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
-              <div className="form-group" style={{marginTop: "1.5rem"}}>
+            {/* Thinking Level for Claude 4.x models */}
+            {provider === "anthropic" && model.includes("claude-") && model.includes("-4") && (
+              <div className="form-group" style={{ marginTop: "1.5rem" }}>
+                <label>Thinking Level</label>
+                <Dropdown
+                  value={thinkingLevel}
+                  onChange={setThinkingLevel}
+                  options={[
+                    { value: "adaptive", label: "Adaptive (Recommended)", description: "Automatically adjusts thinking depth" },
+                    { value: "off", label: "Off", description: "No extended thinking" },
+                    { value: "low", label: "Low", description: "Minimal thinking budget" },
+                    { value: "medium", label: "Medium", description: "Balanced thinking budget" },
+                    { value: "high", label: "High", description: "Maximum thinking depth" },
+                  ]}
+                />
+                <p className="input-hint">Extended thinking improves reasoning on complex tasks. Available for Claude 4.x models.</p>
+              </div>
+            )}
+
+            {!["ollama", "lmstudio", "local"].includes(provider) && (
+              <div className="form-group" style={{ marginTop: "1.5rem" }}>
                 <label>{authMethod === "setup-token" ? "Anthropic Setup Token" : "API Key"}</label>
-                <input 
-                  type="password" 
-                  placeholder="Paste here..." 
-                  value={apiKey} 
-                  onChange={(e) => setApiKey(e.target.value)} 
+                <input
+                  type="password"
+                  placeholder="Paste here..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
                 />
                 {authMethod === "setup-token" && (
                   <p className="input-hint">
@@ -1742,11 +2013,19 @@ Managed by Clawnetes.`,
                   </p>
                 )}
               </div>
+            )}
 
-            
-            <p className="input-hint" style={{marginBottom: "1rem", textAlign: "center"}}>
-              You can skip this for now and configure it later via 'Reconfigure'.
-            </p>
+
+            {["ollama", "lmstudio", "local"].includes(provider) && (
+              <p className="input-hint" style={{ marginBottom: "1rem", textAlign: "center", color: "var(--success)" }}>
+                No API key required for local providers.
+              </p>
+            )}
+            {!["ollama", "lmstudio", "local"].includes(provider) && (
+              <p className="input-hint" style={{ marginBottom: "1rem", textAlign: "center" }}>
+                You can skip this for now and configure it later via 'Reconfigure'.
+              </p>
+            )}
             <div className="button-group">
               <button className="primary" onClick={() => setStep(9)}>Next</button>
               <button className="secondary" onClick={() => setStep(6.5)}>Back</button>
@@ -1757,14 +2036,65 @@ Managed by Clawnetes.`,
         return (
           <div className="step-view">
             <h2>Messaging Channels</h2>
-            <p className="step-description">Connect your agent to Telegram for easy access.</p>
+            <p className="step-description">Select a messaging channel for your agent.</p>
+
             <div className="form-group">
-              <label>Telegram Bot Token</label>
-              <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
-              <p className="input-hint">Get one from @BotFather on Telegram.</p>
+              <label>Channel</label>
+              <Dropdown
+                value={messagingChannel === "none" ? "telegram" : messagingChannel}
+                onChange={(v) => setMessagingChannel(v as "telegram" | "whatsapp")}
+                options={[
+                  { value: "telegram", label: "Telegram", description: "Connect via Telegram Bot" },
+                  { value: "whatsapp", label: "WhatsApp", description: "Connect via WhatsApp (QR pairing at end of setup)" },
+                ]}
+              />
             </div>
-            
-            <div className="button-group">
+
+            {messagingChannel === "telegram" && (
+              <div className="form-group" style={{ marginTop: "1rem" }}>
+                <label>Telegram Bot Token</label>
+                <input type="password" placeholder="123456:ABC-..." value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)} />
+                <p className="input-hint">Get one from @BotFather on Telegram.</p>
+              </div>
+            )}
+
+            {messagingChannel === "whatsapp" && (
+              <div style={{ marginTop: "1rem" }}>
+                <div className="form-group">
+                  <label>WhatsApp DM Policy</label>
+                  <Dropdown
+                    value={whatsappDmPolicy}
+                    onChange={setWhatsappDmPolicy}
+                    options={[
+                      { value: "allowlist", label: "Allowlist (Recommended)", description: "Only your number can interact with the bot" },
+                      { value: "open", label: "Open (Dangerous)", description: "Anyone who messages the bot can interact with it" },
+                    ]}
+                  />
+                  <p className="input-hint" style={{ marginTop: "0.25rem" }}>
+                    If you use Allowlist, enter your phone number below so the bot can reply to you.
+                  </p>
+                </div>
+
+                {whatsappDmPolicy === "allowlist" && (
+                  <div className="form-group" style={{ marginTop: "1rem" }}>
+                    <label>Your Phone Number (Allowlist)</label>
+                    <input
+                      type="text"
+                      placeholder="+1234567890"
+                      value={whatsappPhoneNumber}
+                      onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                    />
+                    <p className="input-hint">The phone number you will use to message the bot. Include country code.</p>
+                  </div>
+                )}
+
+                <p className="input-hint" style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
+                  WhatsApp pairing will happen at the end of setup. You'll scan a QR code to link your account.
+                </p>
+              </div>
+            )}
+
+            <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" onClick={() => {
                 if (mode === "advanced" || skipBasicConfig) handleAdvancedTransition();
                 else setStep(16);
@@ -1809,7 +2139,7 @@ Managed by Clawnetes.`,
           <div className="step-view">
             <h2>Give {agentName ? `${agentName}` : "your agent"} some skills</h2>
             <p className="step-description">Enable capabilities and configure required keys.</p>
-            <div className="skills-container" style={{maxHeight: "450px", overflowY: "auto", border: "1px solid var(--border)", borderRadius: "12px", padding: "0.5rem"}}>
+            <div className="skills-container" style={{ maxHeight: "450px", overflowY: "auto", border: "1px solid var(--border)", borderRadius: "12px", padding: "0.5rem" }}>
               <div className="skills-grid">
                 {availableSkills.map(skill => (
                   <div
@@ -1820,31 +2150,31 @@ Managed by Clawnetes.`,
                       toggleSkill(skill.id);
                     }}
                     style={{
-                      cursor: "pointer", 
-                      display: "flex", 
-                      flexDirection: "column", 
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
                       gap: "0.5rem",
                       minHeight: "100px"
                     }}
                   >
-                    <div className="skill-header" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start"}}>
-                      <div style={{display: "flex", alignItems: "center"}}>
+                    <div className="skill-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ display: "flex", alignItems: "center" }}>
                         {SKILL_ICONS[skill.id] && (
-                          <img 
-                            src={SKILL_ICONS[skill.id]} 
-                            alt="" 
+                          <img
+                            src={SKILL_ICONS[skill.id]}
+                            alt=""
                             style={{
-                              width: "20px", 
-                              height: "20px", 
-                              objectFit: "contain", 
-                              borderRadius: "4px", 
-                              backgroundColor: "white", 
+                              width: "20px",
+                              height: "20px",
+                              objectFit: "contain",
+                              borderRadius: "4px",
+                              backgroundColor: "white",
                               padding: "2px",
                               marginRight: "8px"
-                            }} 
+                            }}
                           />
                         )}
-                        <div className="skill-name" style={{fontWeight: 700}}>{skill.name}</div>
+                        <div className="skill-name" style={{ fontWeight: 700 }}>{skill.name}</div>
                       </div>
                       <div className={`radio-circle ${selectedSkills.includes(skill.id) ? "checked" : ""}`} style={{
                         width: "18px",
@@ -1855,17 +2185,17 @@ Managed by Clawnetes.`,
                         flexShrink: 0
                       }} />
                     </div>
-                    <div className="skill-desc" style={{fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: "1.4"}}>{skill.desc}</div>
-                    
+                    <div className="skill-desc" style={{ fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: "1.4" }}>{skill.desc}</div>
+
                     {skill.requiresAuth && selectedSkills.includes(skill.id) && (
-                      <div className="skill-auth" style={{marginTop: "auto", paddingTop: "0.5rem"}}>
+                      <div className="skill-auth" style={{ marginTop: "auto", paddingTop: "0.5rem" }}>
                         <input
                           type="password"
                           placeholder={skill.authPlaceholder || "API Key"}
                           value={serviceKeys[skill.id] || ""}
-                          onChange={(e) => setServiceKeys({...serviceKeys, [skill.id]: e.target.value})}
+                          onChange={(e) => setServiceKeys({ ...serviceKeys, [skill.id]: e.target.value })}
                           onClick={(e) => e.stopPropagation()}
-                          style={{width: "100%", fontSize: "0.8rem", padding: "0.5rem", borderRadius: "8px"}}
+                          style={{ width: "100%", fontSize: "0.8rem", padding: "0.5rem", borderRadius: "8px" }}
                         />
                       </div>
                     )}
@@ -1874,14 +2204,14 @@ Managed by Clawnetes.`,
               </div>
             </div>
 
-            <div style={{marginTop: "1.5rem"}}>
+            <div style={{ marginTop: "1.5rem" }}>
               <button className="secondary" onClick={() => setShowCustomSkillForm(!showCustomSkillForm)}>
                 {showCustomSkillForm ? "Hide" : "+ Add"} Custom Skill
               </button>
             </div>
 
             {showCustomSkillForm && (
-              <div className="custom-skill-form" style={{marginTop: "1.5rem"}}>
+              <div className="custom-skill-form" style={{ marginTop: "1.5rem" }}>
                 <div className="form-group">
                   <label>Skill Name</label>
                   <input
@@ -1952,14 +2282,14 @@ Managed by Clawnetes.`,
             </div>
 
             {toolsMode === "allowlist" && (
-              <div className="form-group" style={{marginTop: "1rem"}}>
+              <div className="form-group" style={{ marginTop: "1rem" }}>
                 <label>Core Tools</label>
                 <div className="skills-grid">
                   {[
-                    {id: "filesystem", name: "File System"},
-                    {id: "terminal", name: "Terminal"},
-                    {id: "browser", name: "Browser"},
-                    {id: "network", name: "Network"}
+                    { id: "filesystem", name: "File System" },
+                    { id: "terminal", name: "Terminal" },
+                    { id: "browser", name: "Browser" },
+                    { id: "network", name: "Network" }
                   ].map(tool => (
                     <div
                       key={tool.id}
@@ -1977,8 +2307,8 @@ Managed by Clawnetes.`,
                   ))}
                 </div>
 
-                <label style={{marginTop: "1rem"}}>Skills as Tools</label>
-                <div className="skills-grid" style={{maxHeight: "300px", overflowY: "auto"}}>
+                <label style={{ marginTop: "1rem" }}>Skills as Tools</label>
+                <div className="skills-grid" style={{ maxHeight: "300px", overflowY: "auto" }}>
                   {availableSkills.map(skill => (
                     <div
                       key={skill.id}
@@ -1990,17 +2320,17 @@ Managed by Clawnetes.`,
                             : [...prev, skill.id]
                         );
                       }}
-                      style={{padding: "0.75rem"}}
+                      style={{ padding: "0.75rem" }}
                     >
-                      <div style={{display: "flex", alignItems: "center"}}>
+                      <div style={{ display: "flex", alignItems: "center" }}>
                         {SKILL_ICONS[skill.id] && (
                           <img
                             src={SKILL_ICONS[skill.id]}
                             alt=""
-                            style={{width: "16px", height: "16px", objectFit: "contain", borderRadius: "3px", backgroundColor: "white", padding: "1px", marginRight: "6px"}}
+                            style={{ width: "16px", height: "16px", objectFit: "contain", borderRadius: "3px", backgroundColor: "white", padding: "1px", marginRight: "6px" }}
                           />
                         )}
-                        <div className="skill-name" style={{fontSize: "0.85rem"}}>{skill.name}</div>
+                        <div className="skill-name" style={{ fontSize: "0.85rem" }}>{skill.name}</div>
                       </div>
                     </div>
                   ))}
@@ -2019,8 +2349,8 @@ Managed by Clawnetes.`,
           <div className="step-view">
             <h2>Service Key: {servicesToConfigure[currentServiceIdx].name}</h2>
             <p className="step-description">Would you like to provide a key for this optional service now?</p>
-            
-            <div style={{marginBottom: "2rem"}}>
+
+            <div style={{ marginBottom: "2rem" }}>
               <Dropdown
                 value={isConfiguringService === true ? "yes" : "no"}
                 onChange={(val) => setIsConfiguringService(val === "yes")}
@@ -2034,12 +2364,12 @@ Managed by Clawnetes.`,
             {isConfiguringService === true && (
               <div className="form-group animate-fadeIn">
                 <label>{servicesToConfigure[currentServiceIdx].name} API Key</label>
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   autoFocus
-                  placeholder={servicesToConfigure[currentServiceIdx].placeholder} 
-                  value={serviceKeys[servicesToConfigure[currentServiceIdx].id] || ""} 
-                  onChange={(e) => setServiceKeys({...serviceKeys, [servicesToConfigure[currentServiceIdx].id]: e.target.value})} 
+                  placeholder={servicesToConfigure[currentServiceIdx].placeholder}
+                  value={serviceKeys[servicesToConfigure[currentServiceIdx].id] || ""}
+                  onChange={(e) => setServiceKeys({ ...serviceKeys, [servicesToConfigure[currentServiceIdx].id]: e.target.value })}
                 />
               </div>
             )}
@@ -2099,7 +2429,7 @@ Managed by Clawnetes.`,
               />
             </div>
 
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Tools Policy</label>
               <Dropdown
                 value={toolsMode}
@@ -2117,10 +2447,10 @@ Managed by Clawnetes.`,
                 <label>Allowed Tools</label>
                 <div className="skills-grid">
                   {[
-                    {id: "filesystem", name: "File System"},
-                    {id: "terminal", name: "Terminal"},
-                    {id: "browser", name: "Browser"},
-                    {id: "network", name: "Network"}
+                    { id: "filesystem", name: "File System" },
+                    { id: "terminal", name: "Terminal" },
+                    { id: "browser", name: "Browser" },
+                    { id: "network", name: "Network" }
                   ].map(tool => (
                     <div
                       key={tool.id}
@@ -2152,11 +2482,11 @@ Managed by Clawnetes.`,
             <h2>Model Configuration</h2>
             <p className="step-description">Configure your primary and fallback models.</p>
 
-            <div className="form-group" style={{marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px"}}>
+            <div className="form-group" style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px" }}>
               <label>Primary Model</label>
-              <p className="step-description" style={{fontSize: "0.85rem", marginBottom: "0.75rem"}}>Change the primary model used by your agent.</p>
+              <p className="step-description" style={{ fontSize: "0.85rem", marginBottom: "0.75rem" }}>Change the primary model used by your agent.</p>
 
-              <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
+              <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Provider</label>
               <Dropdown
                 value={provider}
                 onChange={(p) => {
@@ -2175,8 +2505,8 @@ Managed by Clawnetes.`,
               />
 
               {MODELS_BY_PROVIDER[provider] && (
-                <div style={{marginTop: "0.75rem"}}>
-                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Model</label>
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Model</label>
                   <Dropdown
                     value={model}
                     onChange={setModel}
@@ -2185,9 +2515,21 @@ Managed by Clawnetes.`,
                   />
                 </div>
               )}
+              {provider === "lmstudio" && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>LM Studio Base URL</label>
+                  <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {provider === "local" && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Custom Base URL</label>
+                  <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                </div>
+              )}
             </div>
 
-            <h3 style={{marginTop: "1.5rem", marginBottom: "0.5rem"}}>Fallback Models</h3>
+            <h3 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>Fallback Models</h3>
             <div className="mode-card-container">
               <div className={`mode-card ${enableFallbacks ? "active" : ""}`} onClick={() => setEnableFallbacks(true)}>
                 <h3>Enable Fallbacks</h3>
@@ -2205,13 +2547,13 @@ Managed by Clawnetes.`,
                   const currentModel = fallbackModels[idx] || "";
                   const currentProvider = currentModel.split('/')[0];
                   const needsAuth = currentProvider && currentProvider !== provider && !serviceKeys[currentProvider];
-                  
+
                   return (
-                    <div key={idx} className="form-group" style={{marginTop: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px"}}>
+                    <div key={idx} className="form-group" style={{ marginTop: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px" }}>
                       <label>Fallback Model {idx + 1} {idx === 1 && "(Optional)"}</label>
-                      
+
                       {/* Provider Selection */}
-                      <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
+                      <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Provider</label>
                       <Dropdown
                         value={currentProvider || ""}
                         onChange={(newProv) => {
@@ -2233,8 +2575,130 @@ Managed by Clawnetes.`,
 
                       {/* Model Selection */}
                       {currentProvider && MODELS_BY_PROVIDER[currentProvider] && (
-                        <div style={{marginTop: "0.75rem"}}>
-                          <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Model</label>
+                        <div style={{ marginTop: "0.75rem" }}>
+                          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Model</label>
+
+                          {/* Ollama dynamic detection for fallback */}
+                          {currentProvider === "ollama" && (
+                            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                              <button
+                                className="secondary"
+                                style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                                disabled={ollamaDetecting}
+                                onClick={async () => {
+                                  setOllamaDetecting(true);
+                                  try {
+                                    const remoteConfig = targetEnvironment === "cloud" ? {
+                                      ip: remoteIp, user: remoteUser,
+                                      password: remotePassword || null,
+                                      privateKeyPath: remotePrivateKeyPath || null
+                                    } : null;
+                                    const models: string[] = await invoke("get_ollama_models", { remote: remoteConfig });
+                                    setOllamaModels(models);
+                                    if (models.length > 0) {
+                                      const newModels = [...fallbackModels];
+                                      newModels[idx] = `ollama/${models[0]}`;
+                                      setFallbackModels(newModels);
+                                    }
+                                  } catch (e) {
+                                    console.error("Ollama detection failed:", e);
+                                  }
+                                  setOllamaDetecting(false);
+                                }}
+                              >
+                                {ollamaDetecting ? "Detecting..." : "Detect Models"}
+                              </button>
+                              {ollamaModels.length > 0 && (
+                                <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                                  Found {ollamaModels.length} model(s)
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* LM Studio dynamic detection for fallback */}
+                          {currentProvider === "lmstudio" && (
+                            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                              <button
+                                className="secondary"
+                                style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                                disabled={lmstudioDetecting}
+                                onClick={async () => {
+                                  setLmstudioDetecting(true);
+                                  try {
+                                    const remoteConfig = targetEnvironment === "cloud" ? {
+                                      ip: remoteIp, user: remoteUser,
+                                      password: remotePassword || null,
+                                      privateKeyPath: remotePrivateKeyPath || null
+                                    } : null;
+                                    const models: string[] = await invoke("get_lmstudio_models", {
+                                      baseUrl: lmstudioBaseUrl,
+                                      remote: remoteConfig
+                                    });
+                                    const prefixedModels = models.map(m => `lmstudio/${m}`);
+                                    setLmstudioModels(prefixedModels);
+                                    if (prefixedModels.length > 0) {
+                                      const newModels = [...fallbackModels];
+                                      newModels[idx] = prefixedModels[0];
+                                      setFallbackModels(newModels);
+                                    }
+                                  } catch (e) {
+                                    console.error("LM Studio detection failed:", e);
+                                  }
+                                  setLmstudioDetecting(false);
+                                }}
+                              >
+                                {lmstudioDetecting ? "Detecting..." : "Detect Models"}
+                              </button>
+                              {lmstudioModels.length > 0 && (
+                                <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                                  Found {lmstudioModels.length} model(s)
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Custom local endpoint detection for fallback */}
+                          {currentProvider === "local" && (
+                            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                              <button
+                                className="secondary"
+                                style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}
+                                disabled={localDetecting}
+                                onClick={async () => {
+                                  setLocalDetecting(true);
+                                  try {
+                                    const remoteConfig = targetEnvironment === "cloud" ? {
+                                      ip: remoteIp, user: remoteUser,
+                                      password: remotePassword || null,
+                                      privateKeyPath: remotePrivateKeyPath || null
+                                    } : null;
+                                    const models: string[] = await invoke("get_lmstudio_models", {
+                                      baseUrl: localBaseUrl,
+                                      remote: remoteConfig
+                                    });
+                                    setLocalModels(models);
+                                    if (models.length > 0) {
+                                      const newModels = [...fallbackModels];
+                                      newModels[idx] = `local/${models[0]}`;
+                                      setFallbackModels(newModels);
+                                    }
+                                  } catch (e) {
+                                    console.error("Local endpoint detection failed:", e);
+                                  }
+                                  setLocalDetecting(false);
+                                }}
+                              >
+                                {localDetecting ? "Detecting..." : "Detect Models"}
+                              </button>
+                              {localModels.length > 0 && (
+                                <span style={{ fontSize: "0.8rem", color: "var(--success)", alignSelf: "center" }}>
+                                  Found {localModels.length} model(s)
+                                </span>
+                              )}
+                            </div>
+                          )}
+
                           <Dropdown
                             value={currentModel}
                             onChange={(val) => {
@@ -2243,20 +2707,42 @@ Managed by Clawnetes.`,
                               setFallbackModels(newModels);
                             }}
                             searchable={MODELS_BY_PROVIDER[currentProvider].length > 10}
-                            options={MODELS_BY_PROVIDER[currentProvider].map(m => ({ value: m.value, label: m.label }))}
+                            options={
+                              currentProvider === "ollama" && ollamaModels.length > 0
+                                ? ollamaModels.map(m => ({ value: `ollama/\${m}`, label: m }))
+                                : currentProvider === "lmstudio" && lmstudioModels.length > 0
+                                  ? lmstudioModels.map(m => ({ value: m, label: m }))
+                                  : currentProvider === "local" && localModels.length > 0
+                                    ? localModels.map(m => ({ value: `local/\${m}`, label: m }))
+                                    : MODELS_BY_PROVIDER[currentProvider].map(m => ({ value: m.value, label: m.label, description: m.description }))
+                            }
                           />
                         </div>
                       )}
 
+                      {/* Base URL for local providers */}
+                      {currentProvider === "lmstudio" && (
+                        <div style={{ marginTop: "0.75rem" }}>
+                          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>LM Studio Base URL</label>
+                          <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                        </div>
+                      )}
+                      {currentProvider === "local" && (
+                        <div style={{ marginTop: "0.75rem" }}>
+                          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Custom Base URL</label>
+                          <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                        </div>
+                      )}
+
                       {/* Auth Selection */}
-                      {currentModel && currentProvider && currentProvider !== provider && !["ollama"].includes(currentProvider) && (
-                        <div style={{marginTop: "0.5rem"}}>
-                          <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentProvider}</label>
+                      {currentModel && currentProvider && currentProvider !== provider && !["ollama", "lmstudio", "local"].includes(currentProvider) && (
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>API Key for {currentProvider}</label>
                           <input
                             type="password"
                             placeholder={`API Key for ${currentProvider}`}
                             value={serviceKeys[currentProvider] || ""}
-                            onChange={(e) => setServiceKeys({...serviceKeys, [currentProvider]: e.target.value})}
+                            onChange={(e) => setServiceKeys({ ...serviceKeys, [currentProvider]: e.target.value })}
                             autoComplete="off"
                           />
                         </div>
@@ -2279,13 +2765,13 @@ Managed by Clawnetes.`,
             <h2>Session Management</h2>
             <p className="step-description">Control when the agent resets context to save costs.</p>
 
-            <div className="mode-card-container" style={{gridTemplateColumns: "1fr 1fr"}}>
+            <div className="mode-card-container" style={{ gridTemplateColumns: "1fr 1fr" }}>
               {[
-                {mode: "1h", label: "Hourly", desc: "Reset every hour"},
-                {mode: "4h", label: "4 Hours", desc: "Reset every 4 hours"},
-                {mode: "24h", label: "Daily", desc: "Reset once per day"},
-                {mode: "idle", label: "Idle Timeout", desc: "Reset after inactivity"},
-                {mode: "never", label: "Never", desc: "Manual reset only"}
+                { mode: "1h", label: "Hourly", desc: "Reset every hour" },
+                { mode: "4h", label: "4 Hours", desc: "Reset every 4 hours" },
+                { mode: "24h", label: "Daily", desc: "Reset once per day" },
+                { mode: "idle", label: "Idle Timeout", desc: "Reset after inactivity" },
+                { mode: "never", label: "Never", desc: "Manual reset only" }
               ].map(item => (
                 <div
                   key={item.mode}
@@ -2299,7 +2785,7 @@ Managed by Clawnetes.`,
             </div>
 
             {heartbeatMode === "idle" && (
-              <div className="form-group" style={{marginTop: "1.5rem"}}>
+              <div className="form-group" style={{ marginTop: "1.5rem" }}>
                 <label>Idle Timeout (minutes)</label>
                 <input
                   type="number"
@@ -2324,8 +2810,8 @@ Managed by Clawnetes.`,
             <h2>Build your AI powered business</h2>
             <p className="step-description">Select specialized business functions to add pre-configured sub-agents to your setup.</p>
 
-            <div style={{marginBottom: "1.5rem"}}>
-              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem"}}>
+            <div style={{ marginBottom: "1.5rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 {Object.values(BUSINESS_FUNCTION_PRESETS).map(bf => (
                   <div
                     key={bf.id}
@@ -2343,12 +2829,12 @@ Managed by Clawnetes.`,
                       cursor: "pointer"
                     }}
                   >
-                    <div style={{display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem"}}>
-                      <span style={{fontSize: "1.2rem"}}>{bf.emoji}</span>
-                      <span style={{fontWeight: 600, fontSize: "0.9rem"}}>{bf.name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                      <span style={{ fontSize: "1.2rem" }}>{bf.emoji}</span>
+                      <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{bf.name}</span>
                     </div>
-                    <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>{bf.description}</div>
-                    <div style={{fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem"}}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{bf.description}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                       {bf.subAgents.length} sub-agent{bf.subAgents.length !== 1 ? "s" : ""}
                     </div>
                   </div>
@@ -2369,16 +2855,16 @@ Managed by Clawnetes.`,
                     cursor: "pointer"
                   }}
                 >
-                  <div style={{display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem"}}>
-                    <span style={{fontSize: "1.2rem"}}>🛠️</span>
-                    <span style={{fontWeight: 600, fontSize: "0.9rem"}}>Custom team of agents</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                    <span style={{ fontSize: "1.2rem" }}>🛠️</span>
+                    <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Custom team of agents</span>
                   </div>
-                  <div style={{fontSize: "0.8rem", color: "var(--text-muted)"}}>Manually configure a custom multi-agent team.</div>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Manually configure a custom multi-agent team.</div>
                 </div>
               </div>
 
               {selectedBusinessFunctions.includes("custom-team") && (
-                <div className="form-group" style={{marginTop: "1rem"}}>
+                <div className="form-group" style={{ marginTop: "1rem" }}>
                   <label>Number of Custom Agents</label>
                   <input
                     type="number"
@@ -2395,7 +2881,7 @@ Managed by Clawnetes.`,
               )}
             </div>
 
-            <div className="button-group" style={{marginTop: "1.5rem"}}>
+            <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" onClick={() => {
                 // Use local variables to track state changes within the click handler
                 // to avoid React batching issues with reading stale state
@@ -2501,10 +2987,10 @@ Managed by Clawnetes.`,
 
         // Core tools for allowed tools selection
         const coreTools = [
-          {id: "filesystem", name: "File System"},
-          {id: "terminal", name: "Terminal"},
-          {id: "browser", name: "Browser"},
-          {id: "network", name: "Network"}
+          { id: "filesystem", name: "File System" },
+          { id: "terminal", name: "Terminal" },
+          { id: "browser", name: "Browser" },
+          { id: "network", name: "Network" }
         ];
 
         return (
@@ -2521,7 +3007,7 @@ Managed by Clawnetes.`,
                   const updated = [...agentConfigs];
                   updated[currentAgentConfigIdx].name = val;
                   if (updated[currentAgentConfigIdx].identityMd) {
-                      updated[currentAgentConfigIdx].identityMd = updateIdentityField(updated[currentAgentConfigIdx].identityMd, "Name", val);
+                    updated[currentAgentConfigIdx].identityMd = updateIdentityField(updated[currentAgentConfigIdx].identityMd, "Name", val);
                   }
                   setAgentConfigs(updated);
                 }}
@@ -2532,7 +3018,7 @@ Managed by Clawnetes.`,
 
             <div className="form-group">
               <label>Agent Emoji</label>
-              <div className="emoji-grid" style={{display: "flex", gap: "0.5rem", flexWrap: "wrap"}}>
+              <div className="emoji-grid" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                 {EMOJI_OPTIONS.map(e => (
                   <button
                     key={e}
@@ -2541,7 +3027,7 @@ Managed by Clawnetes.`,
                       const updated = [...agentConfigs];
                       updated[currentAgentConfigIdx].emoji = e;
                       if (updated[currentAgentConfigIdx].identityMd) {
-                          updated[currentAgentConfigIdx].identityMd = updateIdentityField(updated[currentAgentConfigIdx].identityMd, "Emoji", e);
+                        updated[currentAgentConfigIdx].identityMd = updateIdentityField(updated[currentAgentConfigIdx].identityMd, "Emoji", e);
                       }
                       setAgentConfigs(updated);
                     }}
@@ -2561,7 +3047,7 @@ Managed by Clawnetes.`,
               </div>
             </div>
 
-            <div className="form-group" style={{marginBottom: "1.5rem"}}>
+            <div className="form-group" style={{ marginBottom: "1.5rem" }}>
               <label>Persona Template</label>
               <Dropdown
                 value={currentAgent.persona || "custom"}
@@ -2575,8 +3061,8 @@ Managed by Clawnetes.`,
                     let newSoul = t.soul;
 
                     if (updated[currentAgentConfigIdx].name) {
-                       newIdentity = updateIdentityField(newIdentity, "Name", updated[currentAgentConfigIdx].name);
-                       newSoul = updateSoulMission(newSoul, updated[currentAgentConfigIdx].name);
+                      newIdentity = updateIdentityField(newIdentity, "Name", updated[currentAgentConfigIdx].name);
+                      newSoul = updateSoulMission(newSoul, updated[currentAgentConfigIdx].name);
                     }
 
                     updated[currentAgentConfigIdx].identityMd = newIdentity;
@@ -2594,13 +3080,13 @@ Managed by Clawnetes.`,
               />
             </div>
 
-            <h3 style={{marginTop: "2rem"}}>Agent Workspace</h3>
+            <h3 style={{ marginTop: "2rem" }}>Agent Workspace</h3>
             <div className="workspace-tabs">
               {[
-                {id: "identity", label: "IDENTITY.md"},
-                {id: "soul", label: "SOUL.md"},
-                {id: "tools", label: "TOOLS.md"},
-                {id: "agents", label: "AGENTS.md"}
+                { id: "identity", label: "IDENTITY.md" },
+                { id: "soul", label: "SOUL.md" },
+                { id: "tools", label: "TOOLS.md" },
+                { id: "agents", label: "AGENTS.md" }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -2612,7 +3098,7 @@ Managed by Clawnetes.`,
               ))}
             </div>
 
-            <div className="workspace-editor" style={{marginBottom: "2rem"}}>
+            <div className="workspace-editor" style={{ marginBottom: "2rem" }}>
               {activeWorkspaceTab === "identity" && (
                 <textarea
                   className="markdown-editor"
@@ -2670,10 +3156,10 @@ Managed by Clawnetes.`,
               )}
             </div>
 
-            <div className="form-group" style={{padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem"}}>
+            <div className="form-group" style={{ padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem" }}>
               <label>Primary Model</label>
 
-              <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
+              <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Provider</label>
               <Dropdown
                 value={currentAgentProvider}
                 onChange={(newProv) => {
@@ -2693,8 +3179,8 @@ Managed by Clawnetes.`,
               />
 
               {currentAgentProvider && MODELS_BY_PROVIDER[currentAgentProvider] && (
-                <div style={{marginTop: "0.75rem"}}>
-                  <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Model</label>
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Model</label>
                   <Dropdown
                     value={currentAgent.model}
                     onChange={(val) => {
@@ -2708,94 +3194,118 @@ Managed by Clawnetes.`,
                 </div>
               )}
 
-              {currentAgentProvider && currentAgentProvider !== provider && !serviceKeys[currentAgentProvider] && !["ollama"].includes(currentAgentProvider) && (
-                 <div style={{marginTop: "0.5rem"}}>
-                   <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentAgentProvider}</label>
-                   <input
-                     type="password"
-                     placeholder={`API Key for ${currentAgentProvider}`}
-                     value={serviceKeys[currentAgentProvider] || ""}
-                     onChange={(e) => setServiceKeys({...serviceKeys, [currentAgentProvider]: e.target.value})}
-                     autoComplete="off"
-                   />
-                 </div>
+              {currentAgentProvider === "lmstudio" && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>LM Studio Base URL</label>
+                  <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {currentAgentProvider === "local" && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Custom Base URL</label>
+                  <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                </div>
+              )}
+              {currentAgentProvider && currentAgentProvider !== provider && !serviceKeys[currentAgentProvider] && !["ollama", "lmstudio", "local"].includes(currentAgentProvider) && (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>API Key for {currentAgentProvider}</label>
+                  <input
+                    type="password"
+                    placeholder={`API Key for ${currentAgentProvider}`}
+                    value={serviceKeys[currentAgentProvider] || ""}
+                    onChange={(e) => setServiceKeys({ ...serviceKeys, [currentAgentProvider]: e.target.value })}
+                    autoComplete="off"
+                  />
+                </div>
               )}
             </div>
 
-             <div className="form-group" style={{padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem"}}>
-               <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-                 <label>Fallback Model (Optional)</label>
-                 {currentAgent.fallbackModels[0] && (
-                   <button className="secondary small" style={{padding: "2px 8px", fontSize: "0.75rem", height: "auto"}} onClick={() => {
-                     const updated = [...agentConfigs];
-                     updated[currentAgentConfigIdx].fallbackModels = [];
-                     setAgentConfigs(updated);
-                   }}>Clear</button>
-                 )}
-               </div>
+            <div className="form-group" style={{ padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label>Fallback Model (Optional)</label>
+                {currentAgent.fallbackModels[0] && (
+                  <button className="secondary small" style={{ padding: "2px 8px", fontSize: "0.75rem", height: "auto" }} onClick={() => {
+                    const updated = [...agentConfigs];
+                    updated[currentAgentConfigIdx].fallbackModels = [];
+                    setAgentConfigs(updated);
+                  }}>Clear</button>
+                )}
+              </div>
 
-               {(() => {
-                 const currentFallbackModel = currentAgent.fallbackModels[0] || "";
-                 const currentFallbackProvider = currentFallbackModel.split('/')[0];
+              {(() => {
+                const currentFallbackModel = currentAgent.fallbackModels[0] || "";
+                const currentFallbackProvider = currentFallbackModel.split('/')[0];
 
-                 return (
-                   <>
-                     <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Provider</label>
-                     <Dropdown
-                       value={currentFallbackProvider || ""}
-                       onChange={(newProv) => {
-                         if (!newProv) return;
-                         const updated = [...agentConfigs];
-                         if (DEFAULT_MODELS[newProv]) {
-                           updated[currentAgentConfigIdx].fallbackModels = [DEFAULT_MODELS[newProv]];
-                         } else if (MODELS_BY_PROVIDER[newProv] && MODELS_BY_PROVIDER[newProv].length > 0) {
-                           updated[currentAgentConfigIdx].fallbackModels = [MODELS_BY_PROVIDER[newProv][0].value];
-                         }
-                         setAgentConfigs(updated);
-                       }}
-                       options={Object.keys(MODELS_BY_PROVIDER).sort().map(p => ({
-                         value: p,
-                         label: p.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-                         icon: PROVIDER_LOGOS[p]
-                       }))}
-                     />
+                return (
+                  <>
+                    <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Provider</label>
+                    <Dropdown
+                      value={currentFallbackProvider || ""}
+                      onChange={(newProv) => {
+                        if (!newProv) return;
+                        const updated = [...agentConfigs];
+                        if (DEFAULT_MODELS[newProv]) {
+                          updated[currentAgentConfigIdx].fallbackModels = [DEFAULT_MODELS[newProv]];
+                        } else if (MODELS_BY_PROVIDER[newProv] && MODELS_BY_PROVIDER[newProv].length > 0) {
+                          updated[currentAgentConfigIdx].fallbackModels = [MODELS_BY_PROVIDER[newProv][0].value];
+                        }
+                        setAgentConfigs(updated);
+                      }}
+                      options={Object.keys(MODELS_BY_PROVIDER).sort().map(p => ({
+                        value: p,
+                        label: p.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+                        icon: PROVIDER_LOGOS[p]
+                      }))}
+                    />
 
-                     {currentFallbackProvider && MODELS_BY_PROVIDER[currentFallbackProvider] && (
-                       <div style={{marginTop: "0.75rem"}}>
-                         <label style={{fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem"}}>Model</label>
-                         <Dropdown
-                           value={currentFallbackModel}
-                           onChange={(val) => {
-                             const updated = [...agentConfigs];
-                             updated[currentAgentConfigIdx].fallbackModels = [val];
-                             setAgentConfigs(updated);
-                           }}
-                           searchable={MODELS_BY_PROVIDER[currentFallbackProvider].length > 10}
-                           options={MODELS_BY_PROVIDER[currentFallbackProvider].map(m => ({ value: m.value, label: m.label }))}
-                         />
-                       </div>
-                     )}
+                    {currentFallbackProvider && MODELS_BY_PROVIDER[currentFallbackProvider] && (
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>Model</label>
+                        <Dropdown
+                          value={currentFallbackModel}
+                          onChange={(val) => {
+                            const updated = [...agentConfigs];
+                            updated[currentAgentConfigIdx].fallbackModels = [val];
+                            setAgentConfigs(updated);
+                          }}
+                          searchable={MODELS_BY_PROVIDER[currentFallbackProvider].length > 10}
+                          options={MODELS_BY_PROVIDER[currentFallbackProvider].map(m => ({ value: m.value, label: m.label }))}
+                        />
+                      </div>
+                    )}
 
-                     {currentFallbackProvider && currentFallbackProvider !== provider && currentFallbackProvider !== currentAgentProvider && !serviceKeys[currentFallbackProvider] && !["ollama"].includes(currentFallbackProvider) && (
-                       <div style={{marginTop: "0.5rem"}}>
-                          <label style={{fontSize: "0.85rem", color: "var(--text-muted)"}}>API Key for {currentFallbackProvider}</label>
-                          <input
-                            type="password"
-                            placeholder={`API Key for ${currentFallbackProvider}`}
-                            value={serviceKeys[currentFallbackProvider] || ""}
-                            onChange={(e) => setServiceKeys({...serviceKeys, [currentFallbackProvider]: e.target.value})}
-                            autoComplete="off"
-                          />
-                       </div>
-                     )}
-                   </>
-                 );
-               })()}
-             </div>
+                    {currentFallbackProvider === "lmstudio" && (
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>LM Studio Base URL</label>
+                        <input type="text" placeholder="http://localhost:1234/v1" value={lmstudioBaseUrl} onChange={(e) => setLmstudioBaseUrl(e.target.value)} />
+                      </div>
+                    )}
+                    {currentFallbackProvider === "local" && (
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Custom Base URL</label>
+                        <input type="text" placeholder="http://localhost:8080/v1" value={localBaseUrl} onChange={(e) => setLocalBaseUrl(e.target.value)} />
+                      </div>
+                    )}
+                    {currentFallbackProvider && currentFallbackProvider !== provider && currentFallbackProvider !== currentAgentProvider && !serviceKeys[currentFallbackProvider] && !["ollama", "lmstudio", "local"].includes(currentFallbackProvider) && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>API Key for {currentFallbackProvider}</label>
+                        <input
+                          type="password"
+                          placeholder={`API Key for ${currentFallbackProvider}`}
+                          value={serviceKeys[currentFallbackProvider] || ""}
+                          onChange={(e) => setServiceKeys({ ...serviceKeys, [currentFallbackProvider]: e.target.value })}
+                          autoComplete="off"
+                        />
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
 
             <div className="form-group">
               <label>Skills</label>
-              <div className="skills-grid" style={{marginTop: "0.5rem", maxHeight: "200px", overflowY: "auto"}}>
+              <div className="skills-grid" style={{ marginTop: "0.5rem", maxHeight: "200px", overflowY: "auto" }}>
                 {availableSkills.map(skill => (
                   <div
                     key={skill.id}
@@ -2810,9 +3320,9 @@ Managed by Clawnetes.`,
                       }
                       setAgentConfigs(updated);
                     }}
-                    style={{padding: "0.75rem"}}
+                    style={{ padding: "0.75rem" }}
                   >
-                    <div style={{display: "flex", alignItems: "center"}}>
+                    <div style={{ display: "flex", alignItems: "center" }}>
                       {SKILL_ICONS[skill.id] && (
                         <img
                           src={SKILL_ICONS[skill.id]}
@@ -2828,7 +3338,7 @@ Managed by Clawnetes.`,
                           }}
                         />
                       )}
-                      <div className="skill-name" style={{fontSize: "0.85rem"}}>{skill.name}</div>
+                      <div className="skill-name" style={{ fontSize: "0.85rem" }}>{skill.name}</div>
                     </div>
                   </div>
                 ))}
@@ -2836,10 +3346,10 @@ Managed by Clawnetes.`,
             </div>
 
             {/* Allowed Tools */}
-            <div className="form-group" style={{marginTop: "1rem"}}>
+            <div className="form-group" style={{ marginTop: "1rem" }}>
               <label>Allowed Tools</label>
-              <div className="skills-grid" style={{marginTop: "0.5rem"}}>
-                {[...coreTools, ...availableSkills.map(s => ({id: s.id, name: s.name}))].map(tool => (
+              <div className="skills-grid" style={{ marginTop: "0.5rem" }}>
+                {[...coreTools, ...availableSkills.map(s => ({ id: s.id, name: s.name }))].map(tool => (
                   <div
                     key={`tool-${tool.id}`}
                     className={`skill-card ${currentAgent.allowedTools.includes(tool.id) ? "active" : ""}`}
@@ -2853,27 +3363,27 @@ Managed by Clawnetes.`,
                       }
                       setAgentConfigs(updated);
                     }}
-                    style={{padding: "0.5rem 0.75rem"}}
+                    style={{ padding: "0.5rem 0.75rem" }}
                   >
-                    <div className="skill-name" style={{fontSize: "0.85rem"}}>{tool.name}</div>
+                    <div className="skill-name" style={{ fontSize: "0.85rem" }}>{tool.name}</div>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Cron Jobs */}
-            <div className="form-group" style={{marginTop: "1.5rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+            <div className="form-group" style={{ marginTop: "1.5rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <label>Cron Jobs</label>
-                <button className="secondary" style={{padding: "2px 10px", fontSize: "0.75rem", height: "auto"}} onClick={() => {
+                <button className="secondary" style={{ padding: "2px 10px", fontSize: "0.75rem", height: "auto" }} onClick={() => {
                   const updated = [...agentConfigs];
-                  updated[currentAgentConfigIdx].cronJobs = [...updated[currentAgentConfigIdx].cronJobs, {name: "", schedule: "", command: ""}];
+                  updated[currentAgentConfigIdx].cronJobs = [...updated[currentAgentConfigIdx].cronJobs, { name: "", schedule: "", command: "" }];
                   setAgentConfigs(updated);
                 }}>+ Add</button>
               </div>
               {currentAgent.cronJobs.map((cron, cronIdx) => (
-                <div key={cronIdx} style={{padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "0.5rem"}}>
-                  <div style={{display: "flex", gap: "0.5rem", marginBottom: "0.5rem"}}>
+                <div key={cronIdx} style={{ padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "0.5rem" }}>
+                  <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
                     <input
                       placeholder="Job name"
                       value={cron.name}
@@ -2882,9 +3392,9 @@ Managed by Clawnetes.`,
                         updated[currentAgentConfigIdx].cronJobs[cronIdx].name = e.target.value;
                         setAgentConfigs(updated);
                       }}
-                      style={{flex: 1}}
+                      style={{ flex: 1 }}
                     />
-                    <button className="secondary" style={{padding: "2px 8px", fontSize: "0.75rem", height: "auto", color: "var(--error)"}} onClick={() => {
+                    <button className="secondary" style={{ padding: "2px 8px", fontSize: "0.75rem", height: "auto", color: "var(--error)" }} onClick={() => {
                       const updated = [...agentConfigs];
                       updated[currentAgentConfigIdx].cronJobs = updated[currentAgentConfigIdx].cronJobs.filter((_, i) => i !== cronIdx);
                       setAgentConfigs(updated);
@@ -2898,7 +3408,7 @@ Managed by Clawnetes.`,
                       updated[currentAgentConfigIdx].cronJobs[cronIdx].schedule = e.target.value;
                       setAgentConfigs(updated);
                     }}
-                    style={{marginBottom: "0.5rem"}}
+                    style={{ marginBottom: "0.5rem" }}
                   />
                   <input
                     placeholder="Command"
@@ -2914,8 +3424,8 @@ Managed by Clawnetes.`,
             </div>
 
             {/* Add/Remove Agent buttons */}
-            <div style={{display: "flex", gap: "0.5rem", marginTop: "1rem"}}>
-              <button className="secondary" style={{fontSize: "0.8rem"}} onClick={() => {
+            <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+              <button className="secondary" style={{ fontSize: "0.8rem" }} onClick={() => {
                 const newAgent: AgentConfigData = {
                   id: `agent-${agentConfigs.length + 1}`,
                   name: `Agent ${agentConfigs.length + 1}`,
@@ -2936,7 +3446,7 @@ Managed by Clawnetes.`,
                 setNumAgents(agentConfigs.length + 1);
               }}>+ Add Agent</button>
               {agentConfigs.length > 1 && (
-                <button className="secondary" style={{fontSize: "0.8rem", color: "var(--error)"}} onClick={() => {
+                <button className="secondary" style={{ fontSize: "0.8rem", color: "var(--error)" }} onClick={() => {
                   const updated = agentConfigs.filter((_, i) => i !== currentAgentConfigIdx);
                   setAgentConfigs(updated);
                   setNumAgents(updated.length);
@@ -2947,7 +3457,7 @@ Managed by Clawnetes.`,
               )}
             </div>
 
-            <div className="button-group" style={{marginTop: "1.5rem"}}>
+            <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" onClick={() => {
                 if (currentAgentConfigIdx < agentConfigs.length - 1) {
                   setCurrentAgentConfigIdx(currentAgentConfigIdx + 1);
@@ -2978,17 +3488,17 @@ Managed by Clawnetes.`,
       }
 
 
-case 15.7:
+      case 15.7:
         return (
           <div className="step-view">
             <h2>Extra Settings</h2>
             <p className="step-description">Configure advanced gateway, runtime, security, and session settings.</p>
 
             {/* Gateway Settings */}
-            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+            <div className="accordion-section" style={{ marginBottom: "1rem" }}>
               <button
                 className="accordion-header"
-                onClick={() => setExtraSettingsOpen(prev => ({...prev, gateway: !prev.gateway}))}
+                onClick={() => setExtraSettingsOpen(prev => ({ ...prev, gateway: !prev.gateway }))}
                 style={{
                   width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -2997,29 +3507,29 @@ case 15.7:
                 }}
               >
                 <span>Gateway Settings</span>
-                <span style={{transform: extraSettingsOpen.gateway ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+                <span style={{ transform: extraSettingsOpen.gateway ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
               </button>
               {extraSettingsOpen.gateway && (
-                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                <div style={{ padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)" }}>
                   <div className="form-group">
                     <label>Port</label>
                     <input type="number" value={gatewayPort} onChange={(e) => setGatewayPort(parseInt(e.target.value))} />
                   </div>
-                  <div className="form-group" style={{marginTop: "1rem"}}>
+                  <div className="form-group" style={{ marginTop: "1rem" }}>
                     <label>Bind Address</label>
                     <Dropdown value={gatewayBind} onChange={setGatewayBind} options={[
                       { value: "loopback", label: "Loopback (127.0.0.1)", description: "Only accessible from this machine" },
                       { value: "all", label: "All Interfaces (0.0.0.0)", description: "Accessible from local network" }
                     ]} />
                   </div>
-                  <div className="form-group" style={{marginTop: "1rem"}}>
+                  <div className="form-group" style={{ marginTop: "1rem" }}>
                     <label>Auth Mode</label>
                     <Dropdown value={gatewayAuthMode} onChange={setGatewayAuthMode} options={[
                       { value: "token", label: "Token (Secure)", description: "Requires authentication token" },
                       { value: "none", label: "None (Insecure)", description: "No authentication required" }
                     ]} />
                   </div>
-                  <div className="form-group" style={{marginTop: "1rem"}}>
+                  <div className="form-group" style={{ marginTop: "1rem" }}>
                     <label>Tailscale</label>
                     <Dropdown value={tailscaleMode} onChange={setTailscaleMode} options={[
                       { value: "off", label: "Disabled", description: "Standard networking" },
@@ -3031,10 +3541,10 @@ case 15.7:
             </div>
 
             {/* Runtime Environment */}
-            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+            <div className="accordion-section" style={{ marginBottom: "1rem" }}>
               <button
                 className="accordion-header"
-                onClick={() => setExtraSettingsOpen(prev => ({...prev, runtime: !prev.runtime}))}
+                onClick={() => setExtraSettingsOpen(prev => ({ ...prev, runtime: !prev.runtime }))}
                 style={{
                   width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -3043,10 +3553,10 @@ case 15.7:
                 }}
               >
                 <span>Runtime Environment</span>
-                <span style={{transform: extraSettingsOpen.runtime ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+                <span style={{ transform: extraSettingsOpen.runtime ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
               </button>
               {extraSettingsOpen.runtime && (
-                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                <div style={{ padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)" }}>
                   <div className="form-group">
                     <label>Node Package Manager</label>
                     <Dropdown value={nodeManager} onChange={setNodeManager} options={[
@@ -3060,10 +3570,10 @@ case 15.7:
             </div>
 
             {/* Security (Sandbox) */}
-            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+            <div className="accordion-section" style={{ marginBottom: "1rem" }}>
               <button
                 className="accordion-header"
-                onClick={() => setExtraSettingsOpen(prev => ({...prev, security: !prev.security}))}
+                onClick={() => setExtraSettingsOpen(prev => ({ ...prev, security: !prev.security }))}
                 style={{
                   width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -3072,10 +3582,10 @@ case 15.7:
                 }}
               >
                 <span>Security (Sandbox)</span>
-                <span style={{transform: extraSettingsOpen.security ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+                <span style={{ transform: extraSettingsOpen.security ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
               </button>
               {extraSettingsOpen.security && (
-                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
+                <div style={{ padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)" }}>
                   <div className="form-group">
                     <label>Sandbox Mode</label>
                     <Dropdown value={sandboxMode} onChange={setSandboxMode} options={[
@@ -3089,10 +3599,10 @@ case 15.7:
             </div>
 
             {/* Session Management */}
-            <div className="accordion-section" style={{marginBottom: "1rem"}}>
+            <div className="accordion-section" style={{ marginBottom: "1rem" }}>
               <button
                 className="accordion-header"
-                onClick={() => setExtraSettingsOpen(prev => ({...prev, session: !prev.session}))}
+                onClick={() => setExtraSettingsOpen(prev => ({ ...prev, session: !prev.session }))}
                 style={{
                   width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "1rem", background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -3101,17 +3611,17 @@ case 15.7:
                 }}
               >
                 <span>Session Management</span>
-                <span style={{transform: extraSettingsOpen.session ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s"}}>▼</span>
+                <span style={{ transform: extraSettingsOpen.session ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
               </button>
               {extraSettingsOpen.session && (
-                <div style={{padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)"}}>
-                  <div className="mode-card-container" style={{gridTemplateColumns: "1fr 1fr"}}>
+                <div style={{ padding: "1rem", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "var(--bg-card)" }}>
+                  <div className="mode-card-container" style={{ gridTemplateColumns: "1fr 1fr" }}>
                     {[
-                      {mode: "1h", label: "Hourly", desc: "Reset every hour"},
-                      {mode: "4h", label: "4 Hours", desc: "Reset every 4 hours"},
-                      {mode: "24h", label: "Daily", desc: "Reset once per day"},
-                      {mode: "idle", label: "Idle Timeout", desc: "Reset after inactivity"},
-                      {mode: "never", label: "Never", desc: "Manual reset only"}
+                      { mode: "1h", label: "Hourly", desc: "Reset every hour" },
+                      { mode: "4h", label: "4 Hours", desc: "Reset every 4 hours" },
+                      { mode: "24h", label: "Daily", desc: "Reset once per day" },
+                      { mode: "idle", label: "Idle Timeout", desc: "Reset after inactivity" },
+                      { mode: "never", label: "Never", desc: "Manual reset only" }
                     ].map(item => (
                       <div
                         key={item.mode}
@@ -3124,7 +3634,7 @@ case 15.7:
                     ))}
                   </div>
                   {heartbeatMode === "idle" && (
-                    <div className="form-group" style={{marginTop: "1rem"}}>
+                    <div className="form-group" style={{ marginTop: "1rem" }}>
                       <label>Idle Timeout (minutes)</label>
                       <input type="number" value={idleTimeoutMs / 60000} onChange={e => setIdleTimeoutMs(Number(e.target.value) * 60000)} min="1" max="1440" />
                     </div>
@@ -3140,42 +3650,79 @@ case 15.7:
           </div>
         );
 
-case 16:
+      case 16:
         return (
           <div className="step-view">
             <h2>{initialConfigRef.current ? "Review Configuration" : "Deploy Your AI Agent"}</h2>
             <p className="step-description">{initialConfigRef.current ? "Review your changes before applying." : "Your agent is ready to be deployed."}</p>
-            
+
             <div className="status-card" style={{
-              padding: "1.5rem", 
+              padding: "1.5rem",
               backgroundColor: hasChanges ? "rgba(59, 130, 246, 0.1)" : "rgba(34, 197, 94, 0.1)",
               border: `1px solid ${hasChanges ? "var(--primary)" : "var(--success)"}`,
               borderRadius: "12px",
               marginBottom: "2rem",
               textAlign: "center"
             }}>
-               <div style={{fontSize: "2rem", marginBottom: "1rem"}}>
-                 {hasChanges ? (initialConfigRef.current ? "📝" : "🚀") : "✅"}
-               </div>
-               <h3>{hasChanges ? (initialConfigRef.current ? "Configuration Updated" : "Ready to Deploy") : "No Changes Detected"}</h3>
-               <p style={{color: "var(--text-muted)"}}>
-                 {hasChanges 
-                   ? (initialConfigRef.current ? "You have modified the agent configuration. Click below to apply these changes." : "Your configuration is complete. Click below to deploy your agent.")
-                   : "Your configuration matches the current active settings."}
-               </p>
+              <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>
+                {hasChanges ? (initialConfigRef.current ? "📝" : "🚀") : "✅"}
+              </div>
+              <h3>{hasChanges ? (initialConfigRef.current ? "Configuration Updated" : "Ready to Deploy") : "No Changes Detected"}</h3>
+              <p style={{ color: "var(--text-muted)" }}>
+                {hasChanges
+                  ? (initialConfigRef.current ? "You have modified the agent configuration. Click below to apply these changes." : "Your configuration is complete. Click below to deploy your agent.")
+                  : "Your configuration matches the current active settings."}
+              </p>
             </div>
 
             {(loading || error) && (
-              <div className="progress-container" style={{marginBottom: "2rem"}}>
+              <div className="progress-container" style={{ marginBottom: "2rem" }}>
                 {loading && (
                   <div className="progress-bar">
-                    <div className="progress-fill" style={{width: progress.includes("Gateway") ? "80%" : (progress.includes("skill") ? "50%" : "20%")}} />
+                    <div className="progress-fill" style={{ width: progress.includes("Gateway") ? "80%" : (progress.includes("skill") ? "50%" : "20%") }} />
                   </div>
                 )}
-                <p style={{fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)"}}>{error ? "Installation Failed" : progress}</p>
+                <p style={{ fontSize: "0.9rem", color: error ? "var(--error)" : "var(--primary)" }}>{error ? "Installation Failed" : progress}</p>
                 <div className="logs-container">
                   <pre>{logs}</pre>
                 </div>
+              </div>
+            )}
+
+            {/* Validate Config */}
+            {initialConfigRef.current && (
+              <div style={{ marginBottom: "1.5rem" }}>
+                <button
+                  className="secondary"
+                  style={{ width: "100%", marginBottom: "0.5rem" }}
+                  disabled={validating}
+                  onClick={async () => {
+                    setValidating(true);
+                    setValidateOutput("");
+                    try {
+                      const remoteConfig = targetEnvironment === "cloud" ? {
+                        ip: remoteIp, user: remoteUser,
+                        password: remotePassword || null,
+                        privateKeyPath: remotePrivateKeyPath || null
+                      } : null;
+                      const output: string = await invoke("validate_openclaw_config", {
+                        remote: remoteConfig,
+                        isWsl: false
+                      });
+                      setValidateOutput(output || "Config is valid.");
+                    } catch (e: any) {
+                      setValidateOutput(`Validation error: ${e}`);
+                    }
+                    setValidating(false);
+                  }}
+                >
+                  {validating ? "Validating..." : "Validate Config"}
+                </button>
+                {validateOutput && (
+                  <div className="logs-container">
+                    <pre style={{ fontSize: "0.8rem" }}>{validateOutput}</pre>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3200,7 +3747,7 @@ case 16:
             <h2>Customize {agentName ? `${agentName}'s` : "your agent's"} personality</h2>
             <p className="step-description">Edit your agent's identity, personality, and mission.</p>
 
-            <div className="form-group" style={{marginBottom: "1.5rem"}}>
+            <div className="form-group" style={{ marginBottom: "1.5rem" }}>
               <label>Persona Template</label>
               <Dropdown
                 value={selectedPersona}
@@ -3212,8 +3759,8 @@ case 16:
                     let newSoul = t.soul;
 
                     if (agentName) {
-                       newIdentity = updateIdentityField(newIdentity, "Name", agentName);
-                       newSoul = updateSoulMission(newSoul, agentName);
+                      newIdentity = updateIdentityField(newIdentity, "Name", agentName);
+                      newSoul = updateSoulMission(newSoul, agentName);
                     }
 
                     setIdentityMd(newIdentity);
@@ -3232,11 +3779,11 @@ case 16:
 
             <div className="workspace-tabs">
               {[
-                {id: "identity", label: "IDENTITY.md"},
-                {id: "user", label: "USER.md"},
-                {id: "soul", label: "SOUL.md"},
-                {id: "tools", label: "TOOLS.md"},
-                {id: "agents", label: "AGENTS.md"}
+                { id: "identity", label: "IDENTITY.md" },
+                { id: "user", label: "USER.md" },
+                { id: "soul", label: "SOUL.md" },
+                { id: "tools", label: "TOOLS.md" },
+                { id: "agents", label: "AGENTS.md" }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -3296,23 +3843,23 @@ case 16:
               )}
             </div>
 
-            <p className="input-hint" style={{marginTop: "1rem"}}>
+            <p className="input-hint" style={{ marginTop: "1rem" }}>
               Leave blank to use auto-generated defaults. Changes can be edited later in the workspace folder.
             </p>
 
-            <div className="button-group" style={{gap: "0.5rem"}}>
+            <div className="button-group" style={{ gap: "0.5rem" }}>
               <button
                 className="secondary"
                 disabled={!workspaceModified || savingWorkspace}
                 onClick={() => handleSaveWorkspace()}
-                style={{flex: "0 0 auto", minWidth: "150px"}}
+                style={{ flex: "0 0 auto", minWidth: "150px" }}
               >
                 {savingWorkspace ? "Saving..." : "💾 Save Changes"}
               </button>
-              <button className="primary" onClick={() => setStep(isPresetAgent ? 15 : 13)} style={{flex: 1}}>
+              <button className="primary" onClick={() => setStep(isPresetAgent ? 15 : 13)} style={{ flex: 1 }}>
                 Next
               </button>
-              <button className="secondary" onClick={() => setStep(9)} style={{flex: "0 0 auto"}}>Back</button>
+              <button className="secondary" onClick={() => setStep(9)} style={{ flex: "0 0 auto" }}>Back</button>
             </div>
           </div>
         );
@@ -3332,10 +3879,10 @@ case 16:
                 marginBottom: "1.5rem",
                 border: "1px solid rgba(59, 130, 246, 0.3)"
               }}>
-                <h4 style={{margin: "0 0 0.5rem 0", color: "var(--primary)"}}>
+                <h4 style={{ margin: "0 0 0.5rem 0", color: "var(--primary)" }}>
                   {tunnelActive ? "🔒 SSH Tunnel Active" : "⚠️ Tunnel Inactive"}
                 </h4>
-                <p style={{fontSize: "0.85rem", color: "var(--text-muted)", margin: 0}}>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
                   {tunnelActive
                     ? `Remote gateway (${remoteIp}:18789) is forwarded to localhost:18789`
                     : "SSH tunnel is not active"}
@@ -3343,7 +3890,7 @@ case 16:
                 {tunnelActive ? (
                   <button
                     className="secondary"
-                    style={{marginTop: "1rem", width: "100%"}}
+                    style={{ marginTop: "1rem", width: "100%" }}
                     onClick={async () => {
                       try {
                         await invoke("stop_ssh_tunnel");
@@ -3358,7 +3905,7 @@ case 16:
                 ) : (
                   <button
                     className="primary"
-                    style={{marginTop: "1rem", width: "100%"}}
+                    style={{ marginTop: "1rem", width: "100%" }}
                     onClick={() => handleToggleTunnel()}
                   >
                     Establish SSH Tunnel
@@ -3368,86 +3915,193 @@ case 16:
             )}
 
             <div className="pairing-result">
-               {!isPaired && (
-                 <>
-                   <h3>Telegram Pairing</h3>
-                   <p style={{color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem"}}>
-                     Send any message to your bot to receive your code.
-                   </p>
-                   <div className="pairing-code-display">{pairingCode.includes("Ready") ? "READY" : pairingCode}</div>
+              {!isPaired && (
+                <>
+                  <h3>Telegram Pairing</h3>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem" }}>
+                    Send any message to your bot to receive your code.
+                  </p>
+                  <div className="pairing-code-display">{pairingCode.includes("Ready") ? "READY" : pairingCode}</div>
 
-                   {telegramToken && (
-                     <div className="form-group" style={{marginTop: "2rem"}}>
-                       <input
-                         type="text"
-                         placeholder="Enter code (e.g. 3RQ8EBFE)"
-                         value={pairingInput}
-                         onChange={(e) => setPairingInput(e.target.value.toUpperCase())}
-                         style={{textAlign: "center", letterSpacing: "2px", fontWeight: "bold"}}
-                       />
-                       <button className="primary" style={{width: "100%", marginTop: "1rem"}} onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
-                         {pairingStatus === "Verifying..." ? "Verifying..." : "Pair Agent"}
-                       </button>
-                       {pairingStatus && (
-                         <p style={{marginTop: "1rem", fontWeight: "bold", color: pairingStatus.includes("Error") ? "var(--error)" : "var(--success)"}}>
-                           {pairingStatus}
-                         </p>
-                       )}
-                     </div>
-                   )}
-                 </>
-               )}
-               
-               {true && (
-                  <div className="advanced-setup-prompt" style={{marginTop: "2rem", padding: "1.5rem", backgroundColor: "rgba(59, 130, 246, 0.1)", borderRadius: "12px", border: "1px solid var(--primary)"}}>
-                    <h3 style={{marginTop: 0, marginBottom: "0.5rem"}}>Configuration Complete</h3>
-                    {mode !== "advanced" ? (
-                      <>
-                        <p style={{marginBottom: "0.75rem", fontSize: "1rem"}}>Your agent is live. But right now, it's a solo worker.</p>
-                        <p style={{marginBottom: "1rem", fontSize: "1.05rem", fontWeight: 600}}>Give it a team.</p>
-                        <p style={{marginBottom: "1rem", fontSize: "0.9rem", lineHeight: "1.7", color: "var(--text-main)"}}>
-                          Deploy a fleet of specialized AI agents that research, write, code, manage email, track tasks, and handle customers — all working together, 24/7, while you focus on what matters.
+                  {telegramToken && (
+                    <div className="form-group" style={{ marginTop: "2rem" }}>
+                      <input
+                        type="text"
+                        placeholder="Enter code (e.g. 3RQ8EBFE)"
+                        value={pairingInput}
+                        onChange={(e) => setPairingInput(e.target.value.toUpperCase())}
+                        style={{ textAlign: "center", letterSpacing: "2px", fontWeight: "bold" }}
+                      />
+                      <button className="primary" style={{ width: "100%", marginTop: "1rem" }} onClick={handlePairing} disabled={!pairingInput || pairingStatus === "Verifying..."}>
+                        {pairingStatus === "Verifying..." ? "Verifying..." : "Pair Agent"}
+                      </button>
+                      {pairingStatus && (
+                        <p style={{ marginTop: "1rem", fontWeight: "bold", color: pairingStatus.includes("Error") ? "var(--error)" : "var(--success)" }}>
+                          {pairingStatus}
                         </p>
-                        <div style={{marginBottom: "1.25rem", fontSize: "0.85rem", lineHeight: "2", color: "var(--text-muted)"}}>
-                          <div>Multi-agent teams &bull; 40+ integrations &bull; Scheduled automations</div>
-                          <div>CRM, support, social media &bull; Smart failover &bull; Security controls</div>
-                        </div>
-                      </>
-                    ) : (
-                      <p style={{marginBottom: "1.5rem"}}>Your agent is paired and ready.</p>
-                    )}
-                    <div className="button-group" style={{gap: "1rem"}}>
-                       <button className="primary" onClick={() => open(dashboardUrl)}>
-                         Open Web Dashboard
-                       </button>
-                       {mode !== "advanced" && (
-                         <button className="secondary" onClick={handleAdvancedTransition}>
-                           Continue to Advanced Settings
-                         </button>
-                       )}
-                       <button className="secondary" onClick={() => invoke("close_app")}>
-                         Exit Setup
-                       </button>
+                      )}
                     </div>
-                    <div style={{marginTop: "1.5rem", textAlign: "center"}}>
-                      <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawnetes"); }}
-                        style={{color: "var(--text-muted)", fontSize: "0.9rem", textDecoration: "underline", cursor: "pointer"}}
+                  )}
+                </>
+              )}
+
+              {/* WhatsApp QR Pairing */}
+              {messagingChannel === "whatsapp" && !whatsappPaired && (
+                <div style={{ marginTop: "2rem", padding: "1.5rem", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "12px" }}>
+                  <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>WhatsApp Pairing</h3>
+                  <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+                    Link your WhatsApp account to enable the WhatsApp channel.
+                  </p>
+                  {!whatsappPhoneSubmitted ? (
+                    <div>
+                      <label style={{ fontSize: "0.9rem", marginBottom: "0.5rem", display: "block" }}>Your WhatsApp Phone Number</label>
+                      <input
+                        type="tel"
+                        placeholder="+1234567890"
+                        value={whatsappPhoneNumber}
+                        onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                        style={{ marginBottom: "0.75rem" }}
+                      />
+                      <p className="input-hint">Include country code, e.g. +1234567890.</p>
+                      <button
+                        className="primary"
+                        style={{ width: "100%" }}
+                        disabled={!whatsappPhoneNumber.trim()}
+                        onClick={() => setWhatsappPhoneSubmitted(true)}
                       >
-                        If you find OpenClaw useful, please consider making a small donation to support development.
-                      </a>
+                        Continue
+                      </button>
                     </div>
+                  ) : !whatsappQrStep ? (
+                    <button
+                      className="primary"
+                      style={{ width: "100%" }}
+                      disabled={whatsappQrLoading}
+                      onClick={async () => {
+                        setWhatsappQrLoading(true);
+                        setWhatsappQrStep(true);
+                        try {
+                          const remoteArg = targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null;
+                          const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort, remote: remoteArg });
+                          setWhatsappQrDataUrl(qrDataUrl);
+                          await invoke("wait_whatsapp_login", { gatewayPort, remote: remoteArg });
+                          // Treat any return (true or false) as success — the gateway sometimes
+                          // returns connected:false even when the scan succeeded (credentials saved).
+                          // Only an exception means something genuinely failed.
+                          setWhatsappQrDataUrl("");
+                          setWhatsappPaired(true);
+                          invoke("restart_openclaw_gateway", { remote: remoteArg })
+                            .catch(console.error);
+                        } catch (err) {
+                          console.error(err);
+                          alert("WhatsApp pairing error: " + err);
+                          setWhatsappQrDataUrl("");
+                          setWhatsappQrStep(false);
+                        }
+                        setWhatsappQrLoading(false);
+                      }}
+                    >
+                      {whatsappQrLoading ? "Connecting to gateway (may take ~30s)..." : "Start WhatsApp Pairing"}
+                    </button>
+                  ) : (
+                    <div style={{ textAlign: "center" }}>
+                      {whatsappQrDataUrl ? (
+                        <>
+                          <img
+                            src={whatsappQrDataUrl}
+                            alt="WhatsApp QR Code"
+                            style={{ width: "220px", height: "220px", borderRadius: "8px", marginBottom: "1rem" }}
+                          />
+                          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                            Open WhatsApp &rarr; Linked Devices &rarr; Link a Device &rarr; Scan this QR
+                          </p>
+                          <button
+                            className="secondary"
+                            style={{ marginTop: "0.5rem" }}
+                            onClick={async () => {
+                              try {
+                                const remoteArg = targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null;
+                                const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort, remote: remoteArg });
+                                setWhatsappQrDataUrl(qrDataUrl);
+                                await invoke("wait_whatsapp_login", { gatewayPort, remote: remoteArg });
+                                setWhatsappQrDataUrl("");
+                                setWhatsappPaired(true);
+                                invoke("restart_openclaw_gateway", { remote: remoteArg })
+                                  .catch(console.error);
+                              } catch (err) {
+                                console.error(err);
+                                alert("WhatsApp pairing error: " + err);
+                                setWhatsappQrDataUrl("");
+                              }
+                            }}
+                          >
+                            Refresh QR
+                          </button>
+                        </>
+                      ) : (
+                        <p style={{ color: "var(--text-muted)" }}>Waiting for QR code from gateway...</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {messagingChannel === "whatsapp" && whatsappPaired && (
+                <div style={{ marginTop: "1rem", padding: "1rem", background: "rgba(34, 197, 94, 0.1)", border: "1px solid var(--success)", borderRadius: "8px", textAlign: "center" }}>
+                  <p style={{ color: "var(--success)", fontWeight: 600, margin: 0 }}>WhatsApp linked successfully!</p>
+                </div>
+              )}
+
+              {true && (
+                <div className="advanced-setup-prompt" style={{ marginTop: "2rem", padding: "1.5rem", backgroundColor: "rgba(59, 130, 246, 0.1)", borderRadius: "12px", border: "1px solid var(--primary)" }}>
+                  <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>Configuration Complete</h3>
+                  {mode !== "advanced" ? (
+                    <>
+                      <p style={{ marginBottom: "0.75rem", fontSize: "1rem" }}>Your agent is live. But right now, it's a solo worker.</p>
+                      <p style={{ marginBottom: "1rem", fontSize: "1.05rem", fontWeight: 600 }}>Give it a team.</p>
+                      <p style={{ marginBottom: "1rem", fontSize: "0.9rem", lineHeight: "1.7", color: "var(--text-main)" }}>
+                        Deploy a fleet of specialized AI agents that research, write, code, manage email, track tasks, and handle customers — all working together, 24/7, while you focus on what matters.
+                      </p>
+                      <div style={{ marginBottom: "1.25rem", fontSize: "0.85rem", lineHeight: "2", color: "var(--text-muted)" }}>
+                        <div>Multi-agent teams &bull; 40+ integrations &bull; Scheduled automations</div>
+                        <div>CRM, support, social media &bull; Smart failover &bull; Security controls</div>
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ marginBottom: "1.5rem" }}>Your agent is paired and ready.</p>
+                  )}
+                  <div className="button-group" style={{ gap: "1rem" }}>
+                    <button className="primary" onClick={() => open(dashboardUrl)}>
+                      Open Web Dashboard
+                    </button>
+                    {mode !== "advanced" && (
+                      <button className="secondary" onClick={handleAdvancedTransition}>
+                        Continue to Advanced Settings
+                      </button>
+                    )}
+                    <button className="secondary" onClick={() => invoke("close_app")}>
+                      Exit Setup
+                    </button>
                   </div>
-               )}
+                  <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawnetes"); }}
+                      style={{ color: "var(--text-muted)", fontSize: "0.9rem", textDecoration: "underline", cursor: "pointer" }}
+                    >
+                      If you find OpenClaw useful, please consider making a small donation to support development.
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
 
             {false && (
-              <div className="button-group" style={{flexDirection: "column", gap: "10px"}}>
-                <button className="primary" style={{width: "100%"}} onClick={() => open(dashboardUrl)}>
+              <div className="button-group" style={{ flexDirection: "column", gap: "10px" }}>
+                <button className="primary" style={{ width: "100%" }} onClick={() => open(dashboardUrl)}>
                   Open Web Dashboard {targetEnvironment === "cloud" && "(via Tunnel)"}
                 </button>
-                <button className="secondary" style={{width: "100%"}} onClick={() => invoke("close_app")}>Exit Setup</button>
+                <button className="secondary" style={{ width: "100%" }} onClick={() => invoke("close_app")}>Exit Setup</button>
               </div>
             )}
             <p style={{ marginTop: "2rem", fontSize: "0.85rem", color: "var(--text-muted)", textAlign: "center" }}>
