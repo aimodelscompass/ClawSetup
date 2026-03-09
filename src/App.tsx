@@ -19,6 +19,17 @@ function App() {
     setPairingStatus("");
     setSkipBasicConfig(true);
     setMaintCompleted(true);
+    // When coming from the success screen (step 17), load the just-deployed config as the
+    // comparison baseline so that clicking through advanced settings without any changes
+    // is correctly detected and does not trigger a redeploy.
+    if (step === 17 && !initialConfigRef.current) {
+      try {
+        const config: any = await invoke("get_current_config", { remote: null });
+        initialConfigRef.current = config;
+      } catch (e) {
+        console.warn("Could not load config baseline for change detection:", e);
+      }
+    }
     setStep(10.5);
   };
 
@@ -160,7 +171,7 @@ function App() {
 
   // Messaging channel state
   const [messagingChannel, setMessagingChannel] = useState<"none" | "telegram" | "whatsapp">("telegram");
-  const [whatsappDmPolicy, setWhatsappDmPolicy] = useState("open");
+  const [whatsappDmPolicy, setWhatsappDmPolicy] = useState("allowlist");
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState("");
   const [whatsappPhoneSubmitted, setWhatsappPhoneSubmitted] = useState(false);
   const [whatsappQrDataUrl, setWhatsappQrDataUrl] = useState("");
@@ -488,7 +499,32 @@ function App() {
     return true;
   }
 
-  // Helper to transform the loaded config (from get_current_config) 
+  // Normalize a config payload so that null fields that the backend treats as
+  // "use default" compare equal to their UI-default counterparts.  This is needed
+  // because a basic-mode deploy sends null for security/session fields, but when
+  // the user later visits advanced settings (mode="advanced") those same fields are
+  // emitted with their useState defaults by constructConfigPayload().
+  function normalizeForComparison(payload: any) {
+    if (!payload) return payload;
+    const effectiveToolsMode = payload.tools_mode ?? "allowlist";
+    return {
+      ...payload,
+      sandbox_mode: payload.sandbox_mode ?? "off",
+      tools_mode: effectiveToolsMode,
+      allowed_tools: effectiveToolsMode === "allowlist"
+        ? (payload.allowed_tools ?? ["filesystem", "terminal", "browser"])
+        : payload.allowed_tools,
+      denied_tools: effectiveToolsMode === "denylist"
+        ? (payload.denied_tools ?? [])
+        : null,
+      heartbeat_mode: payload.heartbeat_mode ?? "1h",
+      idle_timeout_ms: (payload.heartbeat_mode ?? "1h") === "idle"
+        ? payload.idle_timeout_ms
+        : null,
+    };
+  }
+
+  // Helper to transform the loaded config (from get_current_config)
   // into the structure expected by configure_agent, for comparison.
   function transformInitialToPayload(initial: any) {
     if (!initial) return null;
@@ -668,7 +704,7 @@ Managed by Clawnetes.`,
 
     if (initialConfigRef.current) {
       const initialPayload = transformInitialToPayload(initialConfigRef.current);
-      if (isDeepEqual(initialPayload, configPayload)) {
+      if (isDeepEqual(normalizeForComparison(initialPayload), normalizeForComparison(configPayload))) {
         setProgress("Configuration unchanged.");
         setTimeout(() => {
           setLoading(false);
@@ -759,12 +795,13 @@ Managed by Clawnetes.`,
         setStep(17);
       } else {
         // Local installation flow
-        setProgress("Installing OpenClaw (this may take a minute)...");
-        setLogs("Installing OpenClaw (this may take a minute)...");
         if (!checks.openclaw) {
+          setProgress("Installing OpenClaw (this may take a minute)...");
+          setLogs("Installing OpenClaw (this may take a minute)...");
           await invoke("install_openclaw");
           const version: string = await invoke("get_openclaw_version");
           setOpenClawVersion(version);
+          setChecks(prev => ({ ...prev, openclaw: true }));
         }
 
         setProgress("Configuring agent...");
@@ -955,8 +992,12 @@ Managed by Clawnetes.`,
       if (config.cron_jobs) setCronJobs(config.cron_jobs);
 
       // Load new fields
-      if (config.whatsapp_enabled) setMessagingChannel("whatsapp");
-      else if (config.telegram_token) setMessagingChannel("telegram");
+      if (config.whatsapp_enabled) {
+        setMessagingChannel("whatsapp");
+        setWhatsappPaired(true);       // already connected; skip QR re-pairing
+        setWhatsappPhoneSubmitted(true);
+      } else if (config.telegram_token) setMessagingChannel("telegram");
+      if (config.whatsapp_phone_number) setWhatsappPhoneNumber(config.whatsapp_phone_number);
       if (config.whatsapp_dm_policy) setWhatsappDmPolicy(config.whatsapp_dm_policy);
       if (config.thinking_level) setThinkingLevel(config.thinking_level);
       if (config.local_base_url) {
@@ -3940,15 +3981,16 @@ Managed by Clawnetes.`,
                         setWhatsappQrLoading(true);
                         setWhatsappQrStep(true);
                         try {
-                          const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort });
+                          const remoteArg = targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null;
+                          const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort, remote: remoteArg });
                           setWhatsappQrDataUrl(qrDataUrl);
-                          await invoke("wait_whatsapp_login", { gatewayPort });
+                          await invoke("wait_whatsapp_login", { gatewayPort, remote: remoteArg });
                           // Treat any return (true or false) as success — the gateway sometimes
                           // returns connected:false even when the scan succeeded (credentials saved).
                           // Only an exception means something genuinely failed.
                           setWhatsappQrDataUrl("");
                           setWhatsappPaired(true);
-                          invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null })
+                          invoke("restart_openclaw_gateway", { remote: remoteArg })
                             .catch(console.error);
                         } catch (err) {
                           console.error(err);
@@ -3959,7 +4001,7 @@ Managed by Clawnetes.`,
                         setWhatsappQrLoading(false);
                       }}
                     >
-                      {whatsappQrLoading ? "Connecting to gateway..." : "Start WhatsApp Pairing"}
+                      {whatsappQrLoading ? "Connecting to gateway (may take ~30s)..." : "Start WhatsApp Pairing"}
                     </button>
                   ) : (
                     <div style={{ textAlign: "center" }}>
@@ -3978,12 +4020,13 @@ Managed by Clawnetes.`,
                             style={{ marginTop: "0.5rem" }}
                             onClick={async () => {
                               try {
-                                const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort });
+                                const remoteArg = targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null;
+                                const qrDataUrl: string = await invoke("start_whatsapp_login", { gatewayPort, remote: remoteArg });
                                 setWhatsappQrDataUrl(qrDataUrl);
-                                await invoke("wait_whatsapp_login", { gatewayPort });
+                                await invoke("wait_whatsapp_login", { gatewayPort, remote: remoteArg });
                                 setWhatsappQrDataUrl("");
                                 setWhatsappPaired(true);
-                                invoke("restart_openclaw_gateway", { remote: targetEnvironment === "cloud" ? { ip: remoteIp, user: remoteUser, password: remotePassword || null, privateKeyPath: remotePrivateKeyPath || null } : null })
+                                invoke("restart_openclaw_gateway", { remote: remoteArg })
                                   .catch(console.error);
                               } catch (err) {
                                 console.error(err);

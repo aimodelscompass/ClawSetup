@@ -3113,221 +3113,306 @@ fn validate_openclaw_config(remote: Option<RemoteInfo>, is_wsl: Option<bool>) ->
 }
 
 #[command]
-async fn start_whatsapp_login(gateway_port: u16) -> Result<String, String> {
+async fn start_whatsapp_login(gateway_port: u16, remote: Option<RemoteInfo>) -> Result<String, String> {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::protocol::Message;
     use futures_util::{StreamExt, SinkExt};
 
+    // Read auth token from the correct host (remote via SSH, or local filesystem).
+    let auth_token: Option<String> = if let Some(ref r) = remote {
+        let sess = connect_ssh(r)?;
+        let home = execute_ssh(&sess, "echo $HOME").unwrap_or_default();
+        let home = home.trim();
+        let json_str = execute_ssh(&sess, &format!("cat {}/.openclaw/openclaw.json", home)).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&json_str)
+            .ok()
+            .and_then(|c| c.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()).map(|s| s.to_string()))
+    } else {
+        let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&openclaw_json_str)
+            .ok()
+            .and_then(|c| c.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()).map(|s| s.to_string()))
+    };
+
+    // On the very first connection to a fresh gateway the gateway responds NOT_PAIRED to the
+    // connect handshake, then immediately auto-approves the new client device.  The connection
+    // is closed right after that response, so any RPC sent on it is lost.  We retry once (after
+    // a short pause) so the second connection sees the now-approved device and gets ok:true.
     let url = format!("ws://127.0.0.1:{}", gateway_port);
-    let (mut ws_stream, _) = connect_async(&url).await
-        .map_err(|e| format!("WebSocket connect failed: {}", e))?;
-
-    let connect_req_id = uuid::Uuid::new_v4().to_string();
-    let mut connect_msg = serde_json::json!({
-        "type": "req",
-        "id": connect_req_id,
-        "method": "connect",
-        "params": {
-            "client": {
-                "id": "gateway-client",
-                "version": "1.0",
-                "platform": std::env::consts::OS,
-                "mode": "backend"
-            },
-            "minProtocol": 3,
-            "maxProtocol": 3,
-            "role": "operator",
-            "scopes": ["operator.admin"]
+    // The gateway auto-approves new client devices asynchronously; from the logs this takes
+    // up to ~30 seconds.  We retry with a 10-second pause so we don't exhaust retries before
+    // approval completes.  5 attempts × 10 s = up to 40 s total wait, well above the observed
+    // ~30 s worst case.
+    let max_attempts: u8 = 5;
+    for attempt in 0..max_attempts {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
-    });
 
-    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
-    if let Ok(oc_config) = serde_json::from_str::<serde_json::Value>(&openclaw_json_str) {
-        if let Some(token) = oc_config.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()) {
+        let (mut ws_stream, _) = connect_async(&url).await
+            .map_err(|e| format!("WebSocket connect failed: {}", e))?;
+
+        let connect_req_id = uuid::Uuid::new_v4().to_string();
+        let mut connect_msg = serde_json::json!({
+            "type": "req",
+            "id": connect_req_id,
+            "method": "connect",
+            "params": {
+                "client": {
+                    "id": "gateway-client",
+                    "version": "1.0",
+                    "platform": std::env::consts::OS,
+                    "mode": "backend"
+                },
+                "minProtocol": 3,
+                "maxProtocol": 3,
+                "role": "operator",
+                "scopes": ["operator.admin"]
+            }
+        });
+        if let Some(ref token) = auth_token {
             if let Some(params) = connect_msg.get_mut("params").and_then(|p| p.as_object_mut()) {
                 params.insert("auth".to_string(), serde_json::json!({ "token": token }));
             }
         }
-    }
 
-    ws_stream.send(Message::Text(connect_msg.to_string())).await
-        .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
+        ws_stream.send(Message::Text(connect_msg.to_string())).await
+            .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
 
-    let mut handshake_ok = false;
-    while let Some(msg) = ws_stream.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-                if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
-                    if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                        handshake_ok = true;
-                        break;
-                    } else {
-                        return Err(format!("Gateway connect handshake failed: {}", text));
-                    }
-                }
-            }
-            Ok(Message::Close(_)) => return Err("WebSocket closed during handshake".to_string()),
-            Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
-            _ => {}
-        }
-    }
-
-    if !handshake_ok {
-        return Err("Gateway connect handshake failed".to_string());
-    }
-
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let rpc_msg = serde_json::json!({
-        "type": "req",
-        "id": request_id,
-        "method": "web.login.start",
-        "params": { 
-            "timeoutMs": 30000,
-            "force": true
-        }
-    });
-
-    ws_stream.send(Message::Text(rpc_msg.to_string())).await
-        .map_err(|e| format!("WebSocket send failed: {}", e))?;
-
-    // Wait for response
-    while let Some(msg) = ws_stream.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-                if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
-                    if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        if let Some(qr) = val.get("payload")
-                            .and_then(|r| r.get("qrDataUrl"))
-                            .and_then(|v| v.as_str())
-                        {
-                            return Ok(qr.to_string());
+        let mut handshake_ok = false;
+        let mut needs_reconnect = false;
+        while let Some(msg) = ws_stream.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                    if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
+                        if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                            handshake_ok = true;
+                            break;
+                        } else {
+                            // NOT_PAIRED / device-required: gateway has started async approval of
+                            // this client device.  Close and retry after a pause so the approval
+                            // can complete before the next attempt.
+                            let error_code = val.get("error")
+                                .and_then(|e| e.get("code"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+                            let detail_code = val.get("error")
+                                .and_then(|e| e.get("details"))
+                                .and_then(|d| d.get("code"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+                            if error_code == "NOT_PAIRED" || detail_code == "DEVICE_IDENTITY_REQUIRED" {
+                                needs_reconnect = true;
+                                break;
+                            }
+                            return Err(format!("Gateway connect handshake failed: {}", text));
                         }
-                    } else if let Some(err) = val.get("error") {
-                        return Err(format!("Gateway error: {}", err));
                     }
                 }
+                Ok(Message::Close(_)) => break,
+                Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
+                _ => {}
             }
-            Ok(Message::Close(_)) => break,
-            Err(e) => return Err(format!("WebSocket error: {}", e)),
-            _ => {}
         }
+
+        if needs_reconnect {
+            continue;
+        }
+        if !handshake_ok {
+            return Err("Gateway connect handshake timed out".to_string());
+        }
+
+        // Handshake succeeded — request QR code.
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let rpc_msg = serde_json::json!({
+            "type": "req",
+            "id": request_id,
+            "method": "web.login.start",
+            "params": { "timeoutMs": 30000, "force": true }
+        });
+
+        ws_stream.send(Message::Text(rpc_msg.to_string())).await
+            .map_err(|e| format!("WebSocket send failed: {}", e))?;
+
+        while let Some(msg) = ws_stream.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                    if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
+                        if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            if let Some(qr) = val.get("payload")
+                                .and_then(|r| r.get("qrDataUrl"))
+                                .and_then(|v| v.as_str())
+                            {
+                                return Ok(qr.to_string());
+                            }
+                            // ok:true but no qrDataUrl — already linked or unexpected format
+                            return Err("Gateway returned ok but no QR code (already linked?)".to_string());
+                        } else if let Some(err) = val.get("error") {
+                            return Err(format!("Gateway error: {}", err));
+                        }
+                    }
+                }
+                Ok(Message::Close(_)) => break,
+                Err(e) => return Err(format!("WebSocket error: {}", e)),
+                _ => {}
+            }
+        }
+
+        // No QR received on this attempt; if retries remain, try again.
     }
 
-    Err("No QR code received from gateway".to_string())
+    Err("No QR code received from gateway after retries".to_string())
 }
 
 #[command]
-async fn wait_whatsapp_login(gateway_port: u16) -> Result<bool, String> {
+async fn wait_whatsapp_login(gateway_port: u16, remote: Option<RemoteInfo>) -> Result<bool, String> {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::protocol::Message;
     use futures_util::{StreamExt, SinkExt};
 
+    let auth_token: Option<String> = if let Some(ref r) = remote {
+        let sess = connect_ssh(r)?;
+        let home = execute_ssh(&sess, "echo $HOME").unwrap_or_default();
+        let home = home.trim();
+        let json_str = execute_ssh(&sess, &format!("cat {}/.openclaw/openclaw.json", home)).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&json_str)
+            .ok()
+            .and_then(|c| c.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()).map(|s| s.to_string()))
+    } else {
+        let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&openclaw_json_str)
+            .ok()
+            .and_then(|c| c.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()).map(|s| s.to_string()))
+    };
+
     let url = format!("ws://127.0.0.1:{}", gateway_port);
-    let (mut ws_stream, _) = connect_async(&url).await
-        .map_err(|e| format!("WebSocket connect failed: {}", e))?;
-
-    let connect_req_id = uuid::Uuid::new_v4().to_string();
-    let mut connect_msg = serde_json::json!({
-        "type": "req",
-        "id": connect_req_id,
-        "method": "connect",
-        "params": {
-            "client": {
-                "id": "gateway-client",
-                "version": "1.0",
-                "platform": std::env::consts::OS,
-                "mode": "backend"
-            },
-            "minProtocol": 3,
-            "maxProtocol": 3,
-            "role": "operator",
-            "scopes": ["operator.admin"]
+    let max_attempts: u8 = 5;
+    for attempt in 0..max_attempts {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
-    });
 
-    let home_dir = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let openclaw_json_str = std::fs::read_to_string(format!("{}/.openclaw/openclaw.json", home_dir)).unwrap_or_default();
-    if let Ok(oc_config) = serde_json::from_str::<serde_json::Value>(&openclaw_json_str) {
-        if let Some(token) = oc_config.get("gateway").and_then(|g| g.get("auth")).and_then(|a| a.get("token")).and_then(|v| v.as_str()) {
+        let (mut ws_stream, _) = connect_async(&url).await
+            .map_err(|e| format!("WebSocket connect failed: {}", e))?;
+
+        let connect_req_id = uuid::Uuid::new_v4().to_string();
+        let mut connect_msg = serde_json::json!({
+            "type": "req",
+            "id": connect_req_id,
+            "method": "connect",
+            "params": {
+                "client": {
+                    "id": "gateway-client",
+                    "version": "1.0",
+                    "platform": std::env::consts::OS,
+                    "mode": "backend"
+                },
+                "minProtocol": 3,
+                "maxProtocol": 3,
+                "role": "operator",
+                "scopes": ["operator.admin"]
+            }
+        });
+        if let Some(ref token) = auth_token {
             if let Some(params) = connect_msg.get_mut("params").and_then(|p| p.as_object_mut()) {
                 params.insert("auth".to_string(), serde_json::json!({ "token": token }));
             }
         }
-    }
 
-    ws_stream.send(Message::Text(connect_msg.to_string())).await
-        .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
+        ws_stream.send(Message::Text(connect_msg.to_string())).await
+            .map_err(|e| format!("WebSocket send connect failed: {}", e))?;
 
-    let mut handshake_ok = false;
-    while let Some(msg) = ws_stream.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-                if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
-                    if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                        handshake_ok = true;
-                        break;
-                    } else {
-                        return Err(format!("Gateway connect handshake failed: {}", text));
-                    }
-                }
-            }
-            Ok(Message::Close(_)) => return Err("WebSocket closed during handshake".to_string()),
-            Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
-            _ => {}
-        }
-    }
-
-    if !handshake_ok {
-        return Err("Gateway connect handshake failed".to_string());
-    }
-
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let rpc_msg = serde_json::json!({
-        "type": "req",
-        "id": request_id,
-        "method": "web.login.wait",
-        "params": { "timeoutMs": 120000 }
-    });
-
-    ws_stream.send(Message::Text(rpc_msg.to_string())).await
-        .map_err(|e| format!("WebSocket send failed: {}", e))?;
-
-    let timeout = tokio::time::timeout(
-        std::time::Duration::from_secs(130),
-        async {
-            while let Some(msg) = ws_stream.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-                        if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
-                            if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                let connected = val.get("payload")
-                                    .and_then(|r| r.get("connected"))
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                return Ok(connected);
-                            } else if let Some(err) = val.get("error") {
-                                return Err(format!("Gateway error: {}", err));
+        let mut handshake_ok = false;
+        let mut needs_reconnect = false;
+        while let Some(msg) = ws_stream.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                    if val.get("id").and_then(|v| v.as_str()) == Some(&connect_req_id) {
+                        if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                            handshake_ok = true;
+                            break;
+                        } else {
+                            let error_code = val.get("error")
+                                .and_then(|e| e.get("code"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+                            let detail_code = val.get("error")
+                                .and_then(|e| e.get("details"))
+                                .and_then(|d| d.get("code"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+                            if error_code == "NOT_PAIRED" || detail_code == "DEVICE_IDENTITY_REQUIRED" {
+                                needs_reconnect = true;
+                                break;
                             }
+                            return Err(format!("Gateway connect handshake failed: {}", text));
                         }
                     }
-                    Ok(Message::Close(_)) => break,
-                    Err(e) => return Err(format!("WebSocket error: {}", e)),
-                    _ => {}
                 }
+                Ok(Message::Close(_)) => break,
+                Err(e) => return Err(format!("WebSocket error during handshake: {}", e)),
+                _ => {}
             }
-            Ok(false)
         }
-    ).await;
 
-    match timeout {
-        Ok(result) => result,
-        Err(_) => Err("WhatsApp login wait timed out".to_string()),
+        if needs_reconnect {
+            continue;
+        }
+        if !handshake_ok {
+            return Err("Gateway connect handshake timed out".to_string());
+        }
+
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let rpc_msg = serde_json::json!({
+            "type": "req",
+            "id": request_id,
+            "method": "web.login.wait",
+            "params": { "timeoutMs": 120000 }
+        });
+
+        ws_stream.send(Message::Text(rpc_msg.to_string())).await
+            .map_err(|e| format!("WebSocket send failed: {}", e))?;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(130),
+            async {
+                while let Some(msg) = ws_stream.next().await {
+                    match msg {
+                        Ok(Message::Text(text)) => {
+                            let val: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+                            if val.get("id").and_then(|v| v.as_str()) == Some(&request_id) {
+                                if val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    let connected = val.get("payload")
+                                        .and_then(|r| r.get("connected"))
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    return Ok(connected);
+                                } else if let Some(err) = val.get("error") {
+                                    return Err(format!("Gateway error: {}", err));
+                                }
+                            }
+                        }
+                        Ok(Message::Close(_)) => break,
+                        Err(e) => return Err(format!("WebSocket error: {}", e)),
+                        _ => {}
+                    }
+                }
+                Ok(false)
+            }
+        ).await;
+
+        return match result {
+            Ok(r) => r,
+            Err(_) => Err("WhatsApp login wait timed out".to_string()),
+        };
     }
+
+    Err("Gateway connect handshake failed after retries".to_string())
 }
 #[command]
 async fn wipe_whatsapp_session() -> Result<(), String> {
@@ -3393,6 +3478,20 @@ async fn check_whatsapp_linked(gateway_port: u16) -> Result<bool, String> {
                     if val.get("ok").and_then(|v| v.as_bool()) == Some(true) {
                         break;
                     } else {
+                        // NOT_PAIRED from the connect handshake means WhatsApp is definitively
+                        // not linked — return false rather than an error.
+                        let error_code = val.get("error")
+                            .and_then(|e| e.get("code"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        let detail_code = val.get("error")
+                            .and_then(|e| e.get("details"))
+                            .and_then(|d| d.get("code"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        if error_code == "NOT_PAIRED" || detail_code == "DEVICE_IDENTITY_REQUIRED" {
+                            return Ok(false);
+                        }
                         return Err(format!("Gateway handshake failed: {}", text));
                     }
                 }
