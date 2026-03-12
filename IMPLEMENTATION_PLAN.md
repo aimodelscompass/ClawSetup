@@ -9,6 +9,8 @@
 - Refresh provider model catalogs and defaults from `openclaw models list --all --json`.
 - Rewrite `openai/...` model refs to `openai-codex/...` whenever Codex OAuth is selected, while normalizing them back for the UI.
 - Ensure the deferred OAuth terminal wrapper writes its completion marker correctly on macOS `zsh`.
+- Restore CLI-first gateway token lookup for dashboard URLs so Control UI auth uses the gateway's actual token source again.
+- Make the visible OpenAI model picker switch to `openai-codex/...` while Codex OAuth is selected.
 
 ## Progress
 - [x] Inspect current React/Tauri auth and model catalog flow.
@@ -21,6 +23,8 @@
 - [x] Detect and replace stale OpenClaw OAuth listeners on known localhost callback ports.
 - [x] Rewrite Codex OAuth model refs to the `openai-codex` namespace when saving config and normalize them back to `openai` for the UI.
 - [x] Fix the macOS deferred OAuth terminal wrapper to avoid the read-only `zsh` `status` variable and unblock setup finalization.
+- [x] Restore CLI-first gateway token lookup in dashboard/token helpers.
+- [x] Make the visible model picker and loaded model state switch to `openai-codex/...` when Codex OAuth is active.
 - [x] Run `npm test`.
 - [x] Run `npm run tauri dev`.
 - [x] Commit and push after successful validation.

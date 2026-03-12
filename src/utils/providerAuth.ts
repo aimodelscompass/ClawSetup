@@ -19,9 +19,18 @@ const MODEL_PROVIDER_OVERRIDE_BY_AUTH_METHOD: Record<string, string> = {
   "openai-codex": "openai-codex",
 };
 
+const BASE_PROVIDER_BY_MODEL_PROVIDER: Record<string, string> = {
+  "openai-codex": "openai",
+};
+
+export function getBaseProvider(provider: string): string {
+  return BASE_PROVIDER_BY_MODEL_PROVIDER[provider] || provider;
+}
+
 export function getEffectiveModelProvider(provider: string, providerAuths: Record<string, ProviderAuthConfig>): string {
-  const authMethod = providerAuths[provider]?.auth_method;
-  return authMethod ? (MODEL_PROVIDER_OVERRIDE_BY_AUTH_METHOD[authMethod] || provider) : provider;
+  const baseProvider = getBaseProvider(provider);
+  const authMethod = providerAuths[baseProvider]?.auth_method;
+  return authMethod ? (MODEL_PROVIDER_OVERRIDE_BY_AUTH_METHOD[authMethod] || baseProvider) : baseProvider;
 }
 
 export function applyModelProviderAuth(modelRef: string, providerAuths: Record<string, ProviderAuthConfig>): string {
@@ -32,12 +41,45 @@ export function applyModelProviderAuth(modelRef: string, providerAuths: Record<s
   return `${effectiveProvider}/${rest.join("/")}`;
 }
 
-export function normalizeModelRefForUi(modelRef: string): string {
+export function getBaseProviderFromModel(modelRef: string): string {
   if (!modelRef || !modelRef.includes("/")) return modelRef;
-  if (modelRef.startsWith("openai-codex/")) {
-    return `openai/${modelRef.slice("openai-codex/".length)}`;
+  return getBaseProvider(modelRef.split("/")[0]);
+}
+
+export function normalizeModelRefForUi(modelRef: string, providerAuths?: Record<string, ProviderAuthConfig>): string {
+  if (!modelRef || !modelRef.includes("/")) return modelRef;
+  if (providerAuths) {
+    return applyModelProviderAuth(modelRef, providerAuths);
   }
-  return modelRef;
+  const [provider, ...rest] = modelRef.split("/");
+  return `${getBaseProvider(provider)}/${rest.join("/")}`;
+}
+
+export function getDisplayModelOptions(
+  provider: string,
+  providerAuths: Record<string, ProviderAuthConfig>,
+  modelsByProvider: Record<string, Array<{ value: string; label: string; description?: string }>>,
+): Array<{ value: string; label: string; description?: string }> {
+  const effectiveProvider = getEffectiveModelProvider(provider, providerAuths);
+  const showExplicitNamespace = effectiveProvider !== provider;
+
+  return (modelsByProvider[provider] || []).map((model) => {
+    const value = applyModelProviderAuth(model.value, providerAuths);
+    return {
+      value,
+      label: showExplicitNamespace ? value : model.label,
+      description: model.description,
+    };
+  });
+}
+
+export function getDefaultModelForProvider(
+  provider: string,
+  providerAuths: Record<string, ProviderAuthConfig>,
+  defaultModels: Record<string, string>,
+): string {
+  const defaultModel = defaultModels[provider];
+  return defaultModel ? applyModelProviderAuth(defaultModel, providerAuths) : "";
 }
 
 export function getDefaultAuthMethod(provider: string): string {
@@ -76,7 +118,7 @@ export function normalizeProviderAuths(providerAuths: Record<string, ProviderAut
 export function getReferencedProviders(models: string[]): string[] {
   const unique = new Set<string>();
   for (const model of models) {
-    const provider = model.split("/")[0];
+    const provider = getBaseProviderFromModel(model);
     if (!provider || LOCAL_PROVIDERS.has(provider)) continue;
     unique.add(provider);
   }

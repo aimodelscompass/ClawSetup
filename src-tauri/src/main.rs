@@ -2304,20 +2304,43 @@ async fn update_remote_openclaw(remote: RemoteInfo) -> Result<String, String> {
     Ok("OpenClaw has been updated on the remote server.".to_string())
 }
 
-#[command]
-async fn get_remote_gateway_token(remote: RemoteInfo) -> Result<String, String> {
-    let sess = connect_ssh(&remote)?;
-    let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
-    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+fn parse_gateway_token_cli_output(output: &str) -> Option<String> {
+    let token = output.trim().trim_matches('"').to_string();
+    if token.is_empty() || token == "null" || token == "undefined" {
+        None
+    } else {
+        Some(token)
+    }
+}
 
-    let token = json
-        .get("gateway")
+fn extract_gateway_token_from_config(config_str: &str, context: &str) -> Result<String, String> {
+    let json: serde_json::Value = serde_json::from_str(config_str).map_err(|e| e.to_string())?;
+    json.get("gateway")
         .and_then(|g| g.get("auth"))
         .and_then(|a| a.get("token"))
         .and_then(|t| t.as_str())
-        .ok_or("Could not find gateway token in remote config")?;
+        .map(|token| token.to_string())
+        .ok_or_else(|| format!("Could not find gateway token in {}", context))
+}
 
-    Ok(token.to_string())
+#[command]
+async fn get_remote_gateway_token(remote: RemoteInfo) -> Result<String, String> {
+    let sess = connect_ssh(&remote)?;
+    let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+    let prefix = get_env_prefix(&os_type);
+    let cli_token = execute_ssh(
+        &sess,
+        &format!("{}openclaw config get gateway.auth.token", prefix),
+    )
+    .ok()
+    .and_then(|output| parse_gateway_token_cli_output(&output));
+
+    if let Some(token) = cli_token {
+        return Ok(token);
+    }
+
+    let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
+    extract_gateway_token_from_config(&content, "remote config")
 }
 
 #[command]
@@ -3409,47 +3432,50 @@ fn get_dashboard_url(is_remote: bool, remote: Option<RemoteInfo>) -> Result<Stri
     let token = if is_remote && remote.is_some() {
         let r = remote.unwrap();
         let sess = connect_ssh(&r)?;
-        let _os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
+        let prefix = get_env_prefix(&os_type);
 
-        let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
-        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-        json.get("gateway")
-            .and_then(|g| g.get("auth"))
-            .and_then(|a| a.get("token"))
-            .and_then(|t| t.as_str())
-            .ok_or("Could not find gateway token in remote config")?
-            .to_string()
+        if let Some(token) = execute_ssh(
+            &sess,
+            &format!("{}openclaw config get gateway.auth.token", prefix),
+        )
+        .ok()
+        .and_then(|output| parse_gateway_token_cli_output(&output))
+        {
+            token
+        } else {
+            let content = execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?;
+            extract_gateway_token_from_config(&content, "remote config")?
+        }
     } else {
         #[cfg(target_os = "windows")]
         {
-            let home = wsl_home_dir()?.trim().to_string();
-            let config_path = format!("{}/.openclaw/openclaw.json", home);
-            let config_str = wsl_read_file(&config_path)?;
-            let json: serde_json::Value =
-                serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
-
-            json.get("gateway")
-                .and_then(|g| g.get("auth"))
-                .and_then(|a| a.get("token"))
-                .and_then(|t| t.as_str())
-                .ok_or("Could not find gateway token in config")?
-                .to_string()
+            if let Some(token) = wsl_root_command("openclaw config get gateway.auth.token")
+                .ok()
+                .and_then(|output| parse_gateway_token_cli_output(&output))
+            {
+                token
+            } else {
+                let home = wsl_home_dir()?.trim().to_string();
+                let config_path = format!("{}/.openclaw/openclaw.json", home);
+                let config_str = wsl_read_file(&config_path)?;
+                extract_gateway_token_from_config(&config_str, "config")?
+            }
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            let home = dirs::home_dir().ok_or("Could not find home directory")?;
-            let config_path = home.join(".openclaw").join("openclaw.json");
-            let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-            let json: serde_json::Value =
-                serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
-
-            json.get("gateway")
-                .and_then(|g| g.get("auth"))
-                .and_then(|a| a.get("token"))
-                .and_then(|t| t.as_str())
-                .ok_or("Could not find gateway token in config")?
-                .to_string()
+            if let Some(token) = shell_command("openclaw config get gateway.auth.token")
+                .ok()
+                .and_then(|output| parse_gateway_token_cli_output(&output))
+            {
+                token
+            } else {
+                let home = dirs::home_dir().ok_or("Could not find home directory")?;
+                let config_path = home.join(".openclaw").join("openclaw.json");
+                let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+                extract_gateway_token_from_config(&config_str, "config")?
+            }
         }
     };
 
@@ -5535,6 +5561,37 @@ mod tests {
             token,
             Some("existing-secret-token"),
             "Gateway auth token must be preserved during reconfiguration"
+        );
+    }
+
+    #[test]
+    fn test_parse_gateway_token_cli_output_rejects_empty_and_nullish_values() {
+        assert_eq!(
+            parse_gateway_token_cli_output("token-123\n"),
+            Some("token-123".to_string())
+        );
+        assert_eq!(
+            parse_gateway_token_cli_output("\"token-123\""),
+            Some("token-123".to_string())
+        );
+        assert_eq!(parse_gateway_token_cli_output(""), None);
+        assert_eq!(parse_gateway_token_cli_output("null"), None);
+        assert_eq!(parse_gateway_token_cli_output("undefined"), None);
+    }
+
+    #[test]
+    fn test_extract_gateway_token_from_config_reads_gateway_auth_token() {
+        let config = serde_json::json!({
+            "gateway": {
+                "auth": {
+                    "token": "config-token-456"
+                }
+            }
+        });
+
+        assert_eq!(
+            extract_gateway_token_from_config(&config.to_string(), "config").unwrap(),
+            "config-token-456"
         );
     }
 

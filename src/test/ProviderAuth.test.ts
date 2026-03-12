@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, normalizeModelRefForUi, normalizeProviderAuths } from "../utils/providerAuth";
+import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, normalizeModelRefForUi, normalizeProviderAuths } from "../utils/providerAuth";
 
 describe("providerAuth utilities", () => {
   it("builds a deduplicated set of referenced remote providers", () => {
@@ -85,7 +85,59 @@ describe("providerAuth utilities", () => {
     })).toBe("openai-codex/gpt-5.4");
   });
 
-  it("normalizes openai-codex model refs back to the ui namespace", () => {
-    expect(normalizeModelRefForUi("openai-codex/gpt-5.4")).toBe("openai/gpt-5.4");
+  it("maps openai-codex model refs back to openai when oauth is not selected", () => {
+    expect(applyModelProviderAuth("openai-codex/gpt-5.4", {
+      openai: {
+        auth_method: "token",
+        token: "sk-test",
+        profile_key: null,
+        profile: null,
+        oauth_provider_id: "openai-codex",
+      },
+    })).toBe("openai/gpt-5.4");
+  });
+
+  it("normalizes openai-codex model refs to visible codex refs when codex oauth is selected", () => {
+    const auths = {
+      openai: {
+        auth_method: "openai-codex",
+        token: "",
+        profile_key: "openai-codex:default",
+        profile: null,
+        oauth_provider_id: "openai-codex",
+      },
+    };
+
+    expect(normalizeModelRefForUi("openai/gpt-5.4", auths)).toBe("openai-codex/gpt-5.4");
+    expect(normalizeModelRefForUi("openai-codex/gpt-5.4", auths)).toBe("openai-codex/gpt-5.4");
+  });
+
+  it("keeps referenced providers keyed by the base provider when codex models are selected", () => {
+    expect(buildReferencedProviders({
+      primaryModel: "openai-codex/gpt-5.4",
+      fallbackModels: ["openai-codex/gpt-5-mini", "anthropic/claude-opus-4-6"],
+    })).toEqual(["anthropic", "openai"]);
+  });
+
+  it("builds codex-visible model options and defaults when codex oauth is selected", () => {
+    const auths = {
+      openai: {
+        auth_method: "openai-codex",
+        token: "",
+        profile_key: "openai-codex:default",
+        profile: null,
+        oauth_provider_id: "openai-codex",
+      },
+    };
+    const options = getDisplayModelOptions("openai", auths, {
+      openai: [
+        { value: "openai/gpt-5.4", label: "GPT-5.4" },
+      ],
+    });
+
+    expect(options).toEqual([
+      { value: "openai-codex/gpt-5.4", label: "openai-codex/gpt-5.4", description: undefined },
+    ]);
+    expect(getDefaultModelForProvider("openai", auths, { openai: "openai/gpt-5.4" })).toBe("openai-codex/gpt-5.4");
   });
 });

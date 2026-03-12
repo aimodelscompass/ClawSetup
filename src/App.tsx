@@ -9,7 +9,7 @@ import { AVAILABLE_SKILLS } from "./presets/availableSkills";
 import { AGENT_TYPE_PRESETS } from "./presets/agentPresets";
 import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
-import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
+import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import Dropdown from "./components/Dropdown";
 import type { AgentTypeId, AgentConfigData, BusinessFunctionId, CronJobConfig, ProviderAuthConfig } from "./types";
 
@@ -345,6 +345,44 @@ function App() {
     return providerAuths[targetProvider] || createDefaultProviderAuth(targetProvider);
   }
 
+  function setProviderAuthMethod(targetProvider: string, value: string) {
+    const oauthOption = OAUTH_METHODS_BY_PROVIDER[targetProvider]?.find(option => option.value === value);
+    setProviderAuths(prev => {
+      const current = prev[targetProvider] || createDefaultProviderAuth(targetProvider);
+      const nextProviderAuths = {
+        ...prev,
+        [targetProvider]: {
+          ...current,
+          auth_method: value,
+          oauth_provider_id: oauthOption?.oauthProviderId ?? null,
+          ...(value === "token" || value === "setup-token"
+            ? { profile_key: null, profile: null }
+            : { token: "" }),
+        },
+      };
+      remapAllModelSelections(nextProviderAuths);
+      return nextProviderAuths;
+    });
+  }
+
+  function getProviderDefaultModel(targetProvider: string, auths: Record<string, ProviderAuthConfig> = providerAuths): string {
+    return getDefaultModelForProvider(targetProvider, auths, DEFAULT_MODELS);
+  }
+
+  function getProviderModelOptions(targetProvider: string, auths: Record<string, ProviderAuthConfig> = providerAuths) {
+    return getDisplayModelOptions(targetProvider, auths, MODELS_BY_PROVIDER);
+  }
+
+  function remapAllModelSelections(nextProviderAuths: Record<string, ProviderAuthConfig>) {
+    setModel(prev => applyModelProviderAuth(prev, nextProviderAuths));
+    setFallbackModels(prev => prev.map(modelRef => applyModelProviderAuth(modelRef, nextProviderAuths)));
+    setAgentConfigs(prev => prev.map(agent => ({
+      ...agent,
+      model: applyModelProviderAuth(agent.model, nextProviderAuths),
+      fallbackModels: agent.fallbackModels.map(modelRef => applyModelProviderAuth(modelRef, nextProviderAuths)),
+    })));
+  }
+
   async function runDeferredOAuthQueue() {
     if (oauthCompletionRunning || deferredOAuthQueue.length === 0) return;
 
@@ -426,16 +464,7 @@ function App() {
         <label>{targetProvider.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")} Authentication</label>
         <Dropdown
           value={auth.auth_method}
-          onChange={(value) => {
-            const oauthOption = OAUTH_METHODS_BY_PROVIDER[targetProvider]?.find(option => option.value === value);
-            updateProviderAuth(targetProvider, {
-              auth_method: value,
-              oauth_provider_id: oauthOption?.oauthProviderId ?? null,
-              ...(value === "token" || value === "setup-token"
-                ? { profile_key: null, profile: null }
-                : { token: "" }),
-            });
-          }}
+          onChange={(value) => setProviderAuthMethod(targetProvider, value)}
           options={authOptions}
         />
 
@@ -1150,13 +1179,19 @@ Managed by Clawnetes.`,
 
       const config: any = await invoke("get_current_config", { remote: remoteConfig });
       initialConfigRef.current = config;
+      const normalizedProviderAuths = normalizeProviderAuths(
+        config.provider_auths,
+        config.provider,
+        config.api_key || "",
+        config.auth_method || "token",
+      );
 
       // Populate state
       setProvider(config.provider);
       setApiKey(config.api_key);
       setAuthMethod(config.auth_method);
-      setProviderAuths(normalizeProviderAuths(config.provider_auths, config.provider, config.api_key || "", config.auth_method || "token"));
-      setModel(normalizeModelRefForUi(config.model));
+      setProviderAuths(normalizedProviderAuths);
+      setModel(normalizeModelRefForUi(config.model, normalizedProviderAuths));
       setUserName(config.user_name);
       setAgentName(config.agent_name);
       setAgentEmoji(config.agent_emoji || "🦞");
@@ -1178,7 +1213,7 @@ Managed by Clawnetes.`,
       setAllowedTools(config.allowed_tools);
       setDeniedTools(config.denied_tools);
 
-      setFallbackModels(config.fallback_models.map(normalizeModelRefForUi));
+      setFallbackModels(config.fallback_models.map((modelRef: string) => normalizeModelRefForUi(modelRef, normalizedProviderAuths)));
       setEnableFallbacks(config.fallback_models.length > 0);
 
       setHeartbeatMode(config.heartbeat_mode);
@@ -1221,8 +1256,8 @@ Managed by Clawnetes.`,
         setAgentConfigs(config.agent_configs.map((a: any) => ({
           id: a.id,
           name: a.name,
-          model: normalizeModelRefForUi(a.model),
-          fallbackModels: (a.fallback_models || []).map(normalizeModelRefForUi),
+          model: normalizeModelRefForUi(a.model, normalizedProviderAuths),
+          fallbackModels: (a.fallback_models || []).map((modelRef: string) => normalizeModelRefForUi(modelRef, normalizedProviderAuths)),
           skills: a.skills || [],
           vibe: a.vibe,
           emoji: a.emoji || "🦞",
@@ -1990,10 +2025,11 @@ Managed by Clawnetes.`,
                 value={provider}
                 onChange={(p) => {
                   setProvider(p);
-                  if (DEFAULT_MODELS[p]) {
-                    setModel(DEFAULT_MODELS[p]);
-                  } else if (MODELS_BY_PROVIDER[p] && MODELS_BY_PROVIDER[p].length > 0) {
-                    setModel(MODELS_BY_PROVIDER[p][0].value);
+                  const defaultModel = getProviderDefaultModel(p);
+                  if (defaultModel) {
+                    setModel(defaultModel);
+                  } else if (getProviderModelOptions(p).length > 0) {
+                    setModel(getProviderModelOptions(p)[0].value);
                   }
                 }}
                 options={[
@@ -2014,16 +2050,7 @@ Managed by Clawnetes.`,
               <label>Auth Method</label>
               <Dropdown
                 value={getProviderAuth(provider).auth_method}
-                onChange={(value) => {
-                  const oauthOption = OAUTH_METHODS_BY_PROVIDER[provider]?.find(option => option.value === value);
-                  updateProviderAuth(provider, {
-                    auth_method: value,
-                    oauth_provider_id: oauthOption?.oauthProviderId ?? null,
-                    ...(value === "token" || value === "setup-token"
-                      ? { profile_key: null, profile: null }
-                      : { token: "" }),
-                  });
-                }}
+                onChange={(value) => setProviderAuthMethod(provider, value)}
                 options={getProviderAuthOptions(provider)}
               />
             </div>
@@ -2174,7 +2201,7 @@ Managed by Clawnetes.`,
                       : provider === "local" && localModels.length > 0
                         ? localModels.map(m => ({ value: `local/${m}`, label: m }))
                         : MODELS_BY_PROVIDER[provider]
-                          ? MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label, description: m.description }))
+                          ? getProviderModelOptions(provider)
                           : [{ value: model, label: model }]
                 }
               />
@@ -2706,10 +2733,11 @@ Managed by Clawnetes.`,
                 value={provider}
                 onChange={(p) => {
                   setProvider(p);
-                  if (DEFAULT_MODELS[p]) {
-                    setModel(DEFAULT_MODELS[p]);
-                  } else if (MODELS_BY_PROVIDER[p] && MODELS_BY_PROVIDER[p].length > 0) {
-                    setModel(MODELS_BY_PROVIDER[p][0].value);
+                  const defaultModel = getProviderDefaultModel(p);
+                  if (defaultModel) {
+                    setModel(defaultModel);
+                  } else if (getProviderModelOptions(p).length > 0) {
+                    setModel(getProviderModelOptions(p)[0].value);
                   }
                 }}
                 options={Object.keys(MODELS_BY_PROVIDER).sort().map(p => ({
@@ -2726,7 +2754,7 @@ Managed by Clawnetes.`,
                     value={model}
                     onChange={setModel}
                     searchable={MODELS_BY_PROVIDER[provider].length > 10}
-                    options={MODELS_BY_PROVIDER[provider].map(m => ({ value: m.value, label: m.label, description: m.description }))}
+                    options={getProviderModelOptions(provider)}
                   />
                 </div>
               )}
@@ -2760,7 +2788,7 @@ Managed by Clawnetes.`,
               <>
                 {[0, 1].map(idx => {
                   const currentModel = fallbackModels[idx] || "";
-                  const currentProvider = currentModel.split('/')[0];
+                  const currentProvider = getBaseProviderFromModel(currentModel);
 
                   return (
                     <div key={idx} className="form-group" style={{ marginTop: "1.5rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px" }}>
@@ -2773,10 +2801,11 @@ Managed by Clawnetes.`,
                         onChange={(newProv) => {
                           if (!newProv) return;
                           const newModels = [...fallbackModels];
-                          if (DEFAULT_MODELS[newProv]) {
-                            newModels[idx] = DEFAULT_MODELS[newProv];
-                          } else if (MODELS_BY_PROVIDER[newProv] && MODELS_BY_PROVIDER[newProv].length > 0) {
-                            newModels[idx] = MODELS_BY_PROVIDER[newProv][0].value;
+                          const defaultModel = getProviderDefaultModel(newProv);
+                          if (defaultModel) {
+                            newModels[idx] = defaultModel;
+                          } else if (getProviderModelOptions(newProv).length > 0) {
+                            newModels[idx] = getProviderModelOptions(newProv)[0].value;
                           }
                           setFallbackModels(newModels);
                         }}
@@ -2928,7 +2957,7 @@ Managed by Clawnetes.`,
                                   ? lmstudioModels.map(m => ({ value: m, label: m }))
                                   : currentProvider === "local" && localModels.length > 0
                                     ? localModels.map(m => ({ value: `local/\${m}`, label: m }))
-                                    : MODELS_BY_PROVIDER[currentProvider].map(m => ({ value: m.value, label: m.label, description: m.description }))
+                                    : getProviderModelOptions(currentProvider)
                             }
                           />
                         </div>
@@ -3193,7 +3222,7 @@ Managed by Clawnetes.`,
           return null;
         }
         const currentAgent = agentConfigs[currentAgentConfigIdx];
-        const currentAgentProvider = currentAgent.model.split('/')[0];
+        const currentAgentProvider = getBaseProviderFromModel(currentAgent.model);
         const currentAgentReferencedProviders = buildReferencedProviders({
           primaryModel: currentAgent.model,
           fallbackModels: currentAgent.fallbackModels || [],
@@ -3378,10 +3407,11 @@ Managed by Clawnetes.`,
                 value={currentAgentProvider}
                 onChange={(newProv) => {
                   const updated = [...agentConfigs];
-                  if (DEFAULT_MODELS[newProv]) {
-                    updated[currentAgentConfigIdx].model = DEFAULT_MODELS[newProv];
-                  } else if (MODELS_BY_PROVIDER[newProv] && MODELS_BY_PROVIDER[newProv].length > 0) {
-                    updated[currentAgentConfigIdx].model = MODELS_BY_PROVIDER[newProv][0].value;
+                  const defaultModel = getProviderDefaultModel(newProv);
+                  if (defaultModel) {
+                    updated[currentAgentConfigIdx].model = defaultModel;
+                  } else if (getProviderModelOptions(newProv).length > 0) {
+                    updated[currentAgentConfigIdx].model = getProviderModelOptions(newProv)[0].value;
                   }
                   setAgentConfigs(updated);
                 }}
@@ -3403,7 +3433,7 @@ Managed by Clawnetes.`,
                       setAgentConfigs(updated);
                     }}
                     searchable={MODELS_BY_PROVIDER[currentAgentProvider].length > 10}
-                    options={MODELS_BY_PROVIDER[currentAgentProvider].map(m => ({ value: m.value, label: m.label }))}
+                    options={getProviderModelOptions(currentAgentProvider)}
                   />
                 </div>
               )}
@@ -3436,7 +3466,7 @@ Managed by Clawnetes.`,
 
               {(() => {
                 const currentFallbackModel = currentAgent.fallbackModels[0] || "";
-                const currentFallbackProvider = currentFallbackModel.split('/')[0];
+                const currentFallbackProvider = getBaseProviderFromModel(currentFallbackModel);
 
                 return (
                   <>
@@ -3446,10 +3476,11 @@ Managed by Clawnetes.`,
                       onChange={(newProv) => {
                         if (!newProv) return;
                         const updated = [...agentConfigs];
-                        if (DEFAULT_MODELS[newProv]) {
-                          updated[currentAgentConfigIdx].fallbackModels = [DEFAULT_MODELS[newProv]];
-                        } else if (MODELS_BY_PROVIDER[newProv] && MODELS_BY_PROVIDER[newProv].length > 0) {
-                          updated[currentAgentConfigIdx].fallbackModels = [MODELS_BY_PROVIDER[newProv][0].value];
+                        const defaultModel = getProviderDefaultModel(newProv);
+                        if (defaultModel) {
+                          updated[currentAgentConfigIdx].fallbackModels = [defaultModel];
+                        } else if (getProviderModelOptions(newProv).length > 0) {
+                          updated[currentAgentConfigIdx].fallbackModels = [getProviderModelOptions(newProv)[0].value];
                         }
                         setAgentConfigs(updated);
                       }}
@@ -3471,7 +3502,7 @@ Managed by Clawnetes.`,
                             setAgentConfigs(updated);
                           }}
                           searchable={MODELS_BY_PROVIDER[currentFallbackProvider].length > 10}
-                          options={MODELS_BY_PROVIDER[currentFallbackProvider].map(m => ({ value: m.value, label: m.label }))}
+                          options={getProviderModelOptions(currentFallbackProvider)}
                         />
                       </div>
                     )}
