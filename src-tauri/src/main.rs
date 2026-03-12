@@ -509,7 +509,7 @@ fn resolve_provider_auth_data(
         })?;
 
     let (profile_key, profile) = pick;
-    let auth_method = profile
+    let raw_auth_method = profile
         .get("type")
         .and_then(|v| v.as_str())
         .or_else(|| profile.get("mode").and_then(|v| v.as_str()))
@@ -526,12 +526,26 @@ fn resolve_provider_auth_data(
             .get("provider")
             .and_then(|v| v.as_str())
             .and_then(|provider_id| {
-                if provider_id != base_provider && auth_method == "oauth" {
+                if provider_id != base_provider && raw_auth_method == "oauth" {
                     Some(provider_id.to_string())
                 } else {
                     None
                 }
             });
+
+    let auth_method = if raw_auth_method == "oauth" {
+        match oauth_provider_id.as_deref() {
+            Some("openai-codex") => "openai-codex".to_string(),
+            Some("google-gemini-cli") => "google-gemini-cli".to_string(),
+            Some("google-antigravity") => "google-antigravity".to_string(),
+            Some("google-vertex") => "google-vertex".to_string(),
+            Some(other) => other.to_string(),
+            None if base_provider == "anthropic" => "claude-cli".to_string(),
+            None => raw_auth_method.clone(),
+        }
+    } else {
+        raw_auth_method.clone()
+    };
 
     Some(ProviderAuthData {
         auth_method,
@@ -5409,7 +5423,7 @@ mod tests {
             resolved.profile_key.as_deref(),
             Some("openai-codex:default")
         );
-        assert_eq!(resolved.auth_method, "oauth");
+        assert_eq!(resolved.auth_method, "openai-codex");
         assert_eq!(resolved.token, "access-token");
         assert_eq!(resolved.oauth_provider_id.as_deref(), Some("openai-codex"));
     }
@@ -5442,6 +5456,27 @@ mod tests {
         );
         assert_eq!(resolved.token, "real-access-token");
         assert_eq!(resolved.oauth_provider_id.as_deref(), Some("openai-codex"));
+    }
+
+    #[test]
+    fn test_resolve_provider_auth_data_maps_anthropic_oauth_to_claude_cli() {
+        let auth_config = serde_json::json!({
+            "profiles": {
+                "anthropic:default": {
+                    "type": "oauth",
+                    "provider": "anthropic",
+                    "access": "anthropic-access"
+                }
+            },
+            "lastGood": {
+                "anthropic": "anthropic:default"
+            }
+        });
+
+        let resolved = resolve_provider_auth_data("anthropic", &auth_config)
+            .expect("provider auth should resolve");
+        assert_eq!(resolved.auth_method, "claude-cli");
+        assert_eq!(resolved.token, "anthropic-access");
     }
 
     #[test]
