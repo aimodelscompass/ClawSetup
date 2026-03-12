@@ -18,6 +18,10 @@ export interface SkillOption {
   desc: string;
   requiresAuth?: boolean;
   authPlaceholder?: string;
+  authMode?: "api_key" | "oauth";
+  oauthBaseProvider?: string;
+  oauthMethod?: string;
+  oauthProviderId?: string;
 }
 
 export interface RadioCardOption {

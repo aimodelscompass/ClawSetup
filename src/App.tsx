@@ -9,7 +9,7 @@ import { AVAILABLE_SKILLS } from "./presets/availableSkills";
 import { AGENT_TYPE_PRESETS } from "./presets/agentPresets";
 import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
-import { buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
+import { buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import Dropdown from "./components/Dropdown";
 import type { AgentTypeId, AgentConfigData, BusinessFunctionId, CronJobConfig, ProviderAuthConfig } from "./types";
 
@@ -83,6 +83,9 @@ function App() {
   });
   const [providerAuthBusy, setProviderAuthBusy] = useState<Record<string, boolean>>({});
   const [providerAuthErrors, setProviderAuthErrors] = useState<Record<string, string>>({});
+  const [oauthCompletionRunning, setOauthCompletionRunning] = useState(false);
+  const [oauthCompletionStarted, setOauthCompletionStarted] = useState(false);
+  const [oauthCompletionResults, setOauthCompletionResults] = useState<Record<string, { status: "pending" | "success" | "error"; message?: string }>>({});
   const [currentServiceIdx, setCurrentServiceIdx] = useState(0);
   const [isConfiguringService, setIsConfiguringService] = useState<boolean | null>(false);
 
@@ -265,6 +268,17 @@ function App() {
     { id: 17, name: "Pairing" }
   ];
 
+  const deferredOAuthQueue = buildDeferredOAuthQueue({
+    referencedProviders: buildReferencedProviders({
+      primaryModel: model,
+      fallbackModels: enableFallbacks ? fallbackModels.filter(Boolean) : [],
+      agentConfigs,
+    }),
+    providerAuths,
+    selectedSkills,
+    availableSkills,
+  });
+
   useEffect(() => { checkSystem(true); }, []);
 
   useEffect(() => {
@@ -284,6 +298,17 @@ function App() {
       checkPairing();
     }
   }, [step]);
+
+  useEffect(() => {
+    if (step !== 17) return;
+    if (deferredOAuthQueue.length === 0) return;
+    if (oauthCompletionRunning || oauthCompletionStarted) return;
+
+    runDeferredOAuthQueue().catch((e) => {
+      console.error("Deferred OAuth flow failed:", e);
+      setOauthCompletionRunning(false);
+    });
+  }, [step, deferredOAuthQueue, oauthCompletionRunning, oauthCompletionStarted]);
 
   useEffect(() => {
     setProviderAuths(prev => normalizeProviderAuths(prev, provider, apiKey, authMethod));
@@ -320,31 +345,52 @@ function App() {
     return providerAuths[targetProvider] || createDefaultProviderAuth(targetProvider);
   }
 
-  async function launchProviderOAuth(targetProvider: string) {
-    const auth = getProviderAuth(targetProvider);
-    const oauthProviderId = auth.oauth_provider_id || OAUTH_METHODS_BY_PROVIDER[targetProvider]?.find(option => option.value === auth.auth_method)?.oauthProviderId;
-    if (!oauthProviderId) return;
+  async function runDeferredOAuthQueue() {
+    if (oauthCompletionRunning || deferredOAuthQueue.length === 0) return;
 
-    setProviderAuthBusy(prev => ({ ...prev, [targetProvider]: true }));
-    setProviderAuthErrors(prev => ({ ...prev, [targetProvider]: "" }));
-    try {
-      const result = await invoke<ProviderAuthConfig>("start_provider_auth", {
-        provider: targetProvider,
-        method: auth.auth_method,
-        oauthProviderId,
-      });
-      updateProviderAuth(targetProvider, result);
-    } catch (e: any) {
-      setProviderAuthErrors(prev => ({ ...prev, [targetProvider]: String(e) }));
-    } finally {
-      setProviderAuthBusy(prev => ({ ...prev, [targetProvider]: false }));
+    setOauthCompletionRunning(true);
+    setOauthCompletionStarted(true);
+
+    for (const item of deferredOAuthQueue) {
+      setOauthCompletionResults(prev => ({
+        ...prev,
+        [item.id]: { status: "pending", message: "Waiting for browser authentication..." },
+      }));
+      setProviderAuthBusy(prev => ({ ...prev, [item.targetProvider]: true }));
+      setProviderAuthErrors(prev => ({ ...prev, [item.targetProvider]: "" }));
+
+      try {
+        const result = await invoke<ProviderAuthConfig>("start_provider_auth", {
+          provider: item.targetProvider,
+          method: item.authMethod,
+          oauthProviderId: item.oauthProviderId,
+        });
+        updateProviderAuth(item.targetProvider, result);
+        setOauthCompletionResults(prev => ({
+          ...prev,
+          [item.id]: { status: "success", message: `Connected via ${item.label}.` },
+        }));
+      } catch (e: any) {
+        const message = String(e);
+        setProviderAuthErrors(prev => ({ ...prev, [item.targetProvider]: message }));
+        setOauthCompletionResults(prev => ({
+          ...prev,
+          [item.id]: { status: "error", message },
+        }));
+      } finally {
+        setProviderAuthBusy(prev => ({ ...prev, [item.targetProvider]: false }));
+      }
     }
+
+    setOauthCompletionRunning(false);
   }
 
   function renderProviderAuthEditor(targetProvider: string) {
     const auth = getProviderAuth(targetProvider);
     const authOptions = getProviderAuthOptions(targetProvider);
     const hasCredential = isOAuthMethod(auth.auth_method) ? !!auth.profile_key : !!auth.token;
+    const providerQueueItem = deferredOAuthQueue.find(item => item.source === "provider" && item.targetProvider === targetProvider);
+    const completionResult = providerQueueItem ? oauthCompletionResults[providerQueueItem.id] : null;
 
     return (
       <div key={targetProvider} className="form-group" style={{ marginTop: "1rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px" }}>
@@ -381,12 +427,23 @@ function App() {
 
         {isOAuthMethod(auth.auth_method) && (
           <div style={{ marginTop: "0.75rem" }}>
-            <button className="secondary" disabled={providerAuthBusy[targetProvider]} onClick={() => launchProviderOAuth(targetProvider)}>
-              {providerAuthBusy[targetProvider] ? "Connecting..." : "Connect with Browser"}
-            </button>
             <p className="input-hint" style={{ marginTop: "0.5rem" }}>
-              {hasCredential ? `Imported profile ${auth.profile_key}.` : "OpenClaw will launch the provider auth flow and import the resulting profile."}
+              {hasCredential
+                ? `Imported profile ${auth.profile_key}.`
+                : checks.openclaw
+                  ? "OAuth will open automatically at the end of setup."
+                  : "OAuth will open automatically after OpenClaw is installed and setup reaches the final step."}
             </p>
+            {!hasCredential && providerQueueItem && !completionResult && (
+              <p className="input-hint" style={{ marginTop: "0.25rem", color: "var(--text-muted)" }}>
+                Deferred until setup completion.
+              </p>
+            )}
+            {completionResult && (
+              <p className="input-hint" style={{ marginTop: "0.25rem", color: completionResult.status === "error" ? "var(--danger, #dc2626)" : "var(--success)" }}>
+                {completionResult.message}
+              </p>
+            )}
           </div>
         )}
 
@@ -1778,13 +1835,13 @@ Managed by Clawnetes.`,
             {/* Show auth keys for skills that require them */}
             {selectedSkills.filter(s => {
               const skill = availableSkills.find(sk => sk.id === s);
-              return skill?.requiresAuth;
+              return skill?.requiresAuth && skill.authMode !== "oauth";
             }).length > 0 && (
                 <div className="form-group" style={{ marginTop: "1rem" }}>
                   <label>Skill API Keys (Optional)</label>
                   {selectedSkills.filter(s => {
                     const skill = availableSkills.find(sk => sk.id === s);
-                    return skill?.requiresAuth;
+                    return skill?.requiresAuth && skill.authMode !== "oauth";
                   }).map(s => {
                     const skill = availableSkills.find(sk => sk.id === s)!;
                     return (
@@ -1802,6 +1859,26 @@ Managed by Clawnetes.`,
                   })}
                 </div>
               )}
+
+            {selectedSkills.filter(s => {
+              const skill = availableSkills.find(sk => sk.id === s);
+              return skill?.authMode === "oauth";
+            }).length > 0 && (
+              <div className="form-group" style={{ marginTop: "1rem" }}>
+                <label>Skill OAuth (Deferred)</label>
+                {selectedSkills.filter(s => {
+                  const skill = availableSkills.find(sk => sk.id === s);
+                  return skill?.authMode === "oauth";
+                }).map(s => {
+                  const skill = availableSkills.find(sk => sk.id === s)!;
+                  return (
+                    <div key={s} style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                      {skill.name}: browser authentication will run at the end of setup.
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" disabled={!LOCAL_PROVIDERS.has(provider) && !isOAuthMethod(getProviderAuth(provider).auth_method) && !getProviderAuth(provider).token} onClick={() => setStep(9)}>Next</button>
@@ -2273,14 +2350,23 @@ Managed by Clawnetes.`,
 
                     {skill.requiresAuth && selectedSkills.includes(skill.id) && (
                       <div className="skill-auth" style={{ marginTop: "auto", paddingTop: "0.5rem" }}>
-                        <input
-                          type="password"
-                          placeholder={skill.authPlaceholder || "API Key"}
-                          value={serviceKeys[skill.id] || ""}
-                          onChange={(e) => setServiceKeys({ ...serviceKeys, [skill.id]: e.target.value })}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ width: "100%", fontSize: "0.8rem", padding: "0.5rem", borderRadius: "8px" }}
-                        />
+                        {skill.authMode === "oauth" ? (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: "100%", fontSize: "0.8rem", padding: "0.5rem", borderRadius: "8px", border: "1px solid var(--border)", color: "var(--text-muted)" }}
+                          >
+                            Browser authentication will run at the end of setup.
+                          </div>
+                        ) : (
+                          <input
+                            type="password"
+                            placeholder={skill.authPlaceholder || "API Key"}
+                            value={serviceKeys[skill.id] || ""}
+                            onChange={(e) => setServiceKeys({ ...serviceKeys, [skill.id]: e.target.value })}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: "100%", fontSize: "0.8rem", padding: "0.5rem", borderRadius: "8px" }}
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -3982,6 +4068,49 @@ Managed by Clawnetes.`,
                     Establish SSH Tunnel
                   </button>
                 )}
+              </div>
+            )}
+
+            {deferredOAuthQueue.length > 0 && (
+              <div style={{
+                padding: "1rem",
+                backgroundColor: "var(--bg-card)",
+                borderRadius: "8px",
+                marginBottom: "1.5rem",
+                border: "1px solid var(--border)"
+              }}>
+                <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>Deferred Browser Authentication</h3>
+                <p className="step-description" style={{ marginBottom: "0.75rem" }}>
+                  OpenClaw is installed. Browser-based authentication is completed here at the end of setup.
+                </p>
+                <div style={{ display: "grid", gap: "0.5rem" }}>
+                  {deferredOAuthQueue.map(item => {
+                    const result = oauthCompletionResults[item.id];
+                    const status = result?.status || (oauthCompletionRunning ? "pending" : "pending");
+                    const color = status === "success" ? "var(--success)" : status === "error" ? "var(--danger, #dc2626)" : "var(--text-muted)";
+                    return (
+                      <div key={item.id} style={{ padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "8px" }}>
+                        <div style={{ fontWeight: 600 }}>{item.label}</div>
+                        <div style={{ fontSize: "0.85rem", color }}>
+                          {result?.message || (oauthCompletionRunning ? "Waiting for authentication..." : "Pending browser authentication")}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  className="secondary"
+                  style={{ width: "100%", marginTop: "1rem" }}
+                  disabled={oauthCompletionRunning}
+                  onClick={() => {
+                    runDeferredOAuthQueue().catch((e) => {
+                      console.error("Deferred OAuth retry failed:", e);
+                      setOauthCompletionRunning(false);
+                    });
+                  }}
+                >
+                  {oauthCompletionRunning ? "Running Browser Authentication..." : "Retry Deferred OAuth"}
+                </button>
               </div>
             )}
 

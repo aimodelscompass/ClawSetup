@@ -1,4 +1,4 @@
-import type { ProviderAuthConfig } from "../types";
+import type { ProviderAuthConfig, SkillOption } from "../types";
 
 export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "local"]);
 
@@ -90,4 +90,73 @@ export function getProviderAuthOptions(provider: string): Array<{ value: string;
 
 export function isOAuthMethod(authMethod: string): boolean {
   return authMethod !== "token" && authMethod !== "setup-token";
+}
+
+export interface DeferredOAuthItem {
+  id: string;
+  label: string;
+  targetProvider: string;
+  authMethod: string;
+  oauthProviderId: string;
+  source: "provider" | "skill";
+  sourceId: string;
+}
+
+export function getOAuthSkillRequirements(selectedSkills: string[], availableSkills: SkillOption[]): DeferredOAuthItem[] {
+  return selectedSkills.flatMap((skillId) => {
+    const skill = availableSkills.find((item) => item.id === skillId);
+    if (!skill || skill.authMode !== "oauth" || !skill.oauthBaseProvider || !skill.oauthMethod || !skill.oauthProviderId) {
+      return [];
+    }
+
+    return [{
+      id: `skill:${skill.id}`,
+      label: skill.name,
+      targetProvider: skill.oauthBaseProvider,
+      authMethod: skill.oauthMethod,
+      oauthProviderId: skill.oauthProviderId,
+      source: "skill" as const,
+      sourceId: skill.id,
+    }];
+  });
+}
+
+export function buildDeferredOAuthQueue(input: {
+  referencedProviders: string[];
+  providerAuths: Record<string, ProviderAuthConfig>;
+  selectedSkills: string[];
+  availableSkills: SkillOption[];
+}): DeferredOAuthItem[] {
+  const queue: DeferredOAuthItem[] = [];
+  const seen = new Set<string>();
+
+  for (const provider of input.referencedProviders) {
+    const auth = input.providerAuths[provider];
+    if (!auth || !isOAuthMethod(auth.auth_method) || auth.profile_key) continue;
+    const oauthProviderId = auth.oauth_provider_id || OAUTH_METHODS_BY_PROVIDER[provider]?.find(option => option.value === auth.auth_method)?.oauthProviderId;
+    if (!oauthProviderId) continue;
+    const dedupeKey = `${provider}:${auth.auth_method}:${oauthProviderId}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    queue.push({
+      id: `provider:${provider}`,
+      label: provider.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" "),
+      targetProvider: provider,
+      authMethod: auth.auth_method,
+      oauthProviderId,
+      source: "provider",
+      sourceId: provider,
+    });
+  }
+
+  for (const skillItem of getOAuthSkillRequirements(input.selectedSkills, input.availableSkills)) {
+    const auth = input.providerAuths[skillItem.targetProvider];
+    if (auth?.profile_key) continue;
+    const dedupeKey = `${skillItem.targetProvider}:${skillItem.authMethod}:${skillItem.oauthProviderId}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    queue.push(skillItem);
+  }
+
+  return queue;
 }

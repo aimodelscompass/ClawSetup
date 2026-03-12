@@ -12,7 +12,16 @@ export const AVAILABLE_SKILLS: SkillOption[] = [
   { id: "clawhub", name: "ClawHub", desc: "Search, install, update, and publish agent skills." },
   { id: "coding-agent", name: "Coding Agent", desc: "Run Codex, Claude Code, or OpenCode programmatic agents." },
   { id: "eightctl", name: "Eight Sleep", desc: "Control Eight Sleep pods (status, temperature, alarms)." },
-  { id: "gemini", name: "Gemini CLI", desc: "Gemini CLI for one-shot Q&A, summaries, and generation." },
+  {
+    id: "gemini",
+    name: "Gemini CLI",
+    desc: "Gemini CLI for one-shot Q&A, summaries, and generation.",
+    requiresAuth: true,
+    authMode: "oauth",
+    oauthBaseProvider: "google",
+    oauthMethod: "google-gemini-cli",
+    oauthProviderId: "google-gemini-cli"
+  },
   { id: "gifgrep", name: "GifGrep", desc: "Search GIF providers, download results, and extract frames." },
   { id: "github", name: "GitHub", desc: "Interact with GitHub using the gh CLI (issues, PRs, runs)." },
   { id: "gog", name: "Google Workspace", desc: "CLI for Gmail, Calendar, Drive, Docs, Sheets, and Contacts." },

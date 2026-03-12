@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, normalizeProviderAuths } from "../utils/providerAuth";
+import { buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getProviderAuthOptions, isOAuthMethod, normalizeProviderAuths } from "../utils/providerAuth";
 
 describe("providerAuth utilities", () => {
   it("builds a deduplicated set of referenced remote providers", () => {
@@ -38,5 +38,38 @@ describe("providerAuth utilities", () => {
       profile: null,
       oauth_provider_id: "anthropic",
     });
+  });
+
+  it("builds a deferred OAuth queue for providers and OAuth skills", () => {
+    const queue = buildDeferredOAuthQueue({
+      referencedProviders: ["anthropic"],
+      providerAuths: {
+        anthropic: {
+          auth_method: "claude-cli",
+          token: "",
+          profile_key: null,
+          profile: null,
+          oauth_provider_id: "anthropic",
+        },
+      },
+      selectedSkills: ["gemini"],
+      availableSkills: [
+        {
+          id: "gemini",
+          name: "Gemini CLI",
+          desc: "Gemini CLI",
+          requiresAuth: true,
+          authMode: "oauth",
+          oauthBaseProvider: "google",
+          oauthMethod: "google-gemini-cli",
+          oauthProviderId: "google-gemini-cli",
+        },
+      ],
+    });
+
+    expect(queue).toEqual([
+      expect.objectContaining({ id: "provider:anthropic", targetProvider: "anthropic", authMethod: "claude-cli" }),
+      expect.objectContaining({ id: "skill:gemini", targetProvider: "google", authMethod: "google-gemini-cli" }),
+    ]);
   });
 });
