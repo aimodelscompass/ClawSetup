@@ -319,6 +319,22 @@ fn apply_model_provider_auth(
     }
 }
 
+fn build_effective_models_catalog(
+    primary_model: &str,
+    fallback_models: &[String],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut models = serde_json::Map::new();
+    models.insert(primary_model.to_string(), serde_json::json!({}));
+
+    for fb_model in fallback_models {
+        if fb_model.split('/').next().is_some() {
+            models.insert(fb_model.clone(), serde_json::json!({}));
+        }
+    }
+
+    models
+}
+
 fn auth_provider_id_for_config(
     provider: &str,
     provider_auth: &ProviderAuthData,
@@ -1541,7 +1557,7 @@ async fn setup_remote_openclaw(remote: RemoteInfo, config: AgentConfig) -> Resul
         "compaction": { "mode": "safeguard" },
         "workspace": workspace,
         "model": { "primary": effective_primary_model },
-        "models": { effective_primary_model.clone(): {} }
+        "models": build_effective_models_catalog(&effective_primary_model, &effective_fallback_models)
     });
 
     // Add fallback models
@@ -3042,17 +3058,15 @@ fn configure_agent(config: AgentConfig) -> Result<String, String> {
         .and_then(|a| a.get_mut("defaults"))
         .and_then(|d| d.as_object_mut())
     {
-        // Initialize dynamic model entry
-        if let Some(models) = defaults.get_mut("models").and_then(|m| m.as_object_mut()) {
-            models.insert(effective_primary_model.clone(), serde_json::json!({}));
-
-            // Also register fallback models so OpenClaw knows their providers
-            for fb_model in &effective_fallback_models {
-                if let Some(_fb_prov) = fb_model.split('/').next() {
-                    models.insert(fb_model.clone(), serde_json::json!({}));
-                }
-            }
-        }
+        // Rebuild the model catalog from the effective namespace so stale providers
+        // from previous auth modes do not survive deep-merge updates.
+        defaults.insert(
+            "models".to_string(),
+            serde_json::Value::Object(build_effective_models_catalog(
+                &effective_primary_model,
+                &effective_fallback_models,
+            )),
+        );
 
         // Correctly place fallbacks under the specific model configuration
         if !effective_fallback_models.is_empty() {
@@ -5608,6 +5622,18 @@ mod tests {
     }
 
     #[test]
+    fn test_build_effective_models_catalog_uses_effective_namespace_only() {
+        let models = build_effective_models_catalog(
+            "openai-codex/gpt-5.4",
+            &["openai-codex/gpt-5.4-mini".to_string()],
+        );
+
+        assert!(models.contains_key("openai-codex/gpt-5.4"));
+        assert!(models.contains_key("openai-codex/gpt-5.4-mini"));
+        assert!(!models.contains_key("openai/gpt-5.4"));
+    }
+
+    #[test]
     fn test_parse_lsof_listener_info_parses_multiple_records() {
         let parsed = parse_lsof_listener_info("p62370\ncopenclaw-models\np70001\ncnode\n");
 
@@ -5760,6 +5786,47 @@ mod tests {
             Some("http://127.0.0.1:18789/#token=abc123".to_string())
         );
         assert_eq!(parse_dashboard_url_cli_output("no dashboard line"), None);
+    }
+
+    #[test]
+    fn test_rebuild_models_catalog_replaces_stale_openai_entry_during_merge() {
+        let mut config_json = serde_json::json!({
+            "agents": {
+                "defaults": {
+                    "models": {
+                        "openai/gpt-5.4": {}
+                    }
+                }
+            }
+        });
+
+        let effective_primary_model = "openai-codex/gpt-5.4".to_string();
+        let effective_fallback_models = vec!["openai-codex/gpt-5.4-mini".to_string()];
+
+        if let Some(defaults) = config_json
+            .get_mut("agents")
+            .and_then(|a| a.get_mut("defaults"))
+            .and_then(|d| d.as_object_mut())
+        {
+            defaults.insert(
+                "models".to_string(),
+                serde_json::Value::Object(build_effective_models_catalog(
+                    &effective_primary_model,
+                    &effective_fallback_models,
+                )),
+            );
+        }
+
+        let models = config_json
+            .get("agents")
+            .and_then(|a| a.get("defaults"))
+            .and_then(|d| d.get("models"))
+            .and_then(|m| m.as_object())
+            .expect("models object");
+
+        assert!(models.contains_key("openai-codex/gpt-5.4"));
+        assert!(models.contains_key("openai-codex/gpt-5.4-mini"));
+        assert!(!models.contains_key("openai/gpt-5.4"));
     }
 
     #[test]

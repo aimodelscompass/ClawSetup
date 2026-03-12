@@ -40,3 +40,4 @@
 - [x] Inspect `~/.openclaw/openclaw.json` for provider auth and model refs.
 - [x] Inspect current OpenClaw logs for gateway/auth/model errors.
 - [x] Correlate the runtime errors with the generated config and identify the remaining bad code path.
+- [x] Remove stale `agents.defaults.models.openai/...` entries during deep-merge reconfiguration so Codex OAuth cannot regress back to plain `openai/...`.
