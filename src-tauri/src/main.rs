@@ -484,21 +484,10 @@ fn is_openclaw_listener(listener: &PortListenerInfo) -> bool {
 
 fn find_oauth_port_listeners(port: u16) -> Result<Vec<PortListenerInfo>, String> {
     let cmd = format!(
-        "if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:{} -sTCP:LISTEN -Fpc 2>/dev/null; fi",
+        "if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:{} -sTCP:LISTEN -Fpc 2>/dev/null || true; fi",
         port
     );
-    shell_command(&cmd)
-        .map(|output| parse_lsof_listener_info(&output))
-        .or_else(|err| {
-            if err.trim().is_empty() {
-                Ok(Vec::new())
-            } else {
-                Err(format!(
-                    "Failed to inspect localhost:{} for stale OAuth listeners: {}",
-                    port, err
-                ))
-            }
-        })
+    shell_command(&cmd).map(|output| parse_lsof_listener_info(&output))
 }
 
 fn terminate_listener_process(listener: &PortListenerInfo, port: u16) -> Result<(), String> {
