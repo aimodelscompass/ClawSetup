@@ -8,6 +8,7 @@
 - Replace stale OpenClaw OAuth callback listeners before starting a fresh deferred OAuth session.
 - Refresh provider model catalogs and defaults from `openclaw models list --all --json`.
 - Rewrite `openai/...` model refs to `openai-codex/...` whenever Codex OAuth is selected, while normalizing them back for the UI.
+- Ensure the deferred OAuth terminal wrapper writes its completion marker correctly on macOS `zsh`.
 
 ## Progress
 - [x] Inspect current React/Tauri auth and model catalog flow.
@@ -19,6 +20,7 @@
 - [x] Launch deferred OAuth in a real terminal and wait for completion markers before importing auth profiles.
 - [x] Detect and replace stale OpenClaw OAuth listeners on known localhost callback ports.
 - [x] Rewrite Codex OAuth model refs to the `openai-codex` namespace when saving config and normalize them back to `openai` for the UI.
+- [x] Fix the macOS deferred OAuth terminal wrapper to avoid the read-only `zsh` `status` variable and unblock setup finalization.
 - [x] Run `npm test`.
 - [x] Run `npm run tauri dev`.
 - [x] Commit and push after successful validation.

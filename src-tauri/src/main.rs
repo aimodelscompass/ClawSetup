@@ -626,7 +626,7 @@ fn cleanup_stale_oauth_listener(oauth_provider_id: &str) -> Result<(), String> {
 #[allow(dead_code)]
 fn build_terminal_runner_command(command: &str, marker_path: &str) -> String {
     format!(
-        "{}; status=$?; printf '%s' \"$status\" > {}; exit $status",
+        "{}; auth_exit_code=$?; printf '%s' \"$auth_exit_code\" > {}; exit $auth_exit_code",
         command,
         shell_single_quote(marker_path)
     )
@@ -649,7 +649,7 @@ fn build_unix_terminal_script(
     };
 
     format!(
-        "{shebang}\n{wrapped_command}\nstatus=$?\nprintf '%s' \"$status\" > {marker}\nexit $status\n",
+        "{shebang}\n{wrapped_command}\nauth_exit_code=$?\nprintf '%s' \"$auth_exit_code\" > {marker}\nexit $auth_exit_code\n",
         marker = shell_single_quote(marker_path)
     )
 }
@@ -5315,8 +5315,9 @@ mod tests {
         let runner = build_terminal_runner_command(command, "/tmp/clawnetes-oauth.exit");
 
         assert!(runner.contains("openclaw models auth login"));
-        assert!(runner.contains("printf '%s' \"$status\" > '/tmp/clawnetes-oauth.exit'"));
-        assert!(runner.ends_with("exit $status"));
+        assert!(runner.contains("auth_exit_code=$?"));
+        assert!(runner.contains("printf '%s' \"$auth_exit_code\" > '/tmp/clawnetes-oauth.exit'"));
+        assert!(runner.ends_with("exit $auth_exit_code"));
     }
 
     #[test]
@@ -5329,7 +5330,11 @@ mod tests {
 
         assert!(script.starts_with("#!/bin/zsh -l"));
         assert!(script.contains("openclaw models auth login --provider 'openai-codex'"));
-        assert!(script.contains("printf '%s' \"$status\" > '/tmp/clawnetes-oauth.exit'"));
+        assert!(script.contains("auth_exit_code=$?"));
+        assert!(script.contains(
+            "printf '%s' \"$auth_exit_code\" > '/tmp/clawnetes-oauth.exit'"
+        ));
+        assert!(!script.contains("\nstatus=$?\n"));
     }
 
     #[test]
