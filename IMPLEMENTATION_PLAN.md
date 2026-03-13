@@ -14,7 +14,7 @@
 - [x] Add tests for migration, sanitization, and tool-only UI options.
 - [x] Run `npm test`.
 - [x] Run `npm run tauri dev`.
-- [ ] Commit and push after validation succeeds.
+- [x] Commit and push after validation succeeds.
 
 ## Notes
 - Existing unrelated worktree changes must be preserved.
