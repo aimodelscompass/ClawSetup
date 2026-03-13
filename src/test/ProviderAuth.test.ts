@@ -25,21 +25,22 @@ describe("providerAuth utilities", () => {
     expect(openaiOptions).toContain("openai-codex");
   });
 
-  it("labels anthropic claude-cli as the setup-token flow", () => {
+  it("keeps anthropic api key and setup-token options only", () => {
     const anthropicOptions = getProviderAuthOptions("anthropic");
-    expect(anthropicOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          value: "claude-cli",
-          label: "Claude Code Setup Token",
-        }),
-      ]),
-    );
+    expect(anthropicOptions.map((option) => option.value)).toEqual(["token", "setup-token"]);
   });
 
-  it("marks non-token auth methods as OAuth", () => {
+  it("restricts google auth methods to gemini api key and gemini cli oauth", () => {
+    const googleOptions = getProviderAuthOptions("google").map((option) => option.value);
+    expect(googleOptions).toEqual(["token", "google-gemini-cli"]);
+  });
+
+  it("marks only supported oauth methods as OAuth", () => {
     expect(isOAuthMethod("openai-codex")).toBe(true);
+    expect(isOAuthMethod("google-gemini-cli")).toBe(true);
     expect(isOAuthMethod("token")).toBe(false);
+    expect(isOAuthMethod("setup-token")).toBe(false);
+    expect(isOAuthMethod("claude-cli")).toBe(false);
   });
 
   it("creates a default provider auth record", () => {
@@ -48,20 +49,44 @@ describe("providerAuth utilities", () => {
       token: "",
       profile_key: null,
       profile: null,
-      oauth_provider_id: "anthropic",
+      oauth_provider_id: null,
     });
   });
 
-  it("builds a deferred OAuth queue for providers and OAuth skills", () => {
+  it("normalizes deprecated auth methods to supported options", () => {
+    const auths = normalizeProviderAuths({
+      anthropic: {
+        auth_method: "claude-cli",
+        token: "legacy-token",
+        profile_key: "anthropic:default",
+        profile: null,
+        oauth_provider_id: "anthropic",
+      },
+      google: {
+        auth_method: "google-antigravity",
+        token: "legacy-google-token",
+        profile_key: "google-antigravity:default",
+        profile: null,
+        oauth_provider_id: "google-antigravity",
+      },
+    }, "anthropic", "", "token");
+
+    expect(auths.anthropic.auth_method).toBe("setup-token");
+    expect(auths.anthropic.oauth_provider_id).toBeNull();
+    expect(auths.google.auth_method).toBe("token");
+    expect(auths.google.profile_key).toBeNull();
+  });
+
+  it("builds a deferred OAuth queue for supported oauth providers and OAuth skills", () => {
     const queue = buildDeferredOAuthQueue({
-      referencedProviders: ["anthropic"],
+      referencedProviders: ["google"],
       providerAuths: {
-        anthropic: {
-          auth_method: "claude-cli",
+        google: {
+          auth_method: "google-gemini-cli",
           token: "",
           profile_key: null,
           profile: null,
-          oauth_provider_id: "anthropic",
+          oauth_provider_id: "google-gemini-cli",
         },
       },
       selectedSkills: ["gemini"],
@@ -80,8 +105,7 @@ describe("providerAuth utilities", () => {
     });
 
     expect(queue).toEqual([
-      expect.objectContaining({ id: "provider:anthropic", targetProvider: "anthropic", authMethod: "claude-cli" }),
-      expect.objectContaining({ id: "skill:gemini", targetProvider: "google", authMethod: "google-gemini-cli" }),
+      expect.objectContaining({ id: "provider:google", targetProvider: "google", authMethod: "google-gemini-cli" }),
     ]);
   });
 

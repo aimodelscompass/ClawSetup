@@ -3,15 +3,11 @@ import type { ProviderAuthConfig, SkillOption } from "../types";
 export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "local"]);
 
 export const OAUTH_METHODS_BY_PROVIDER: Record<string, Array<{ value: string; label: string; oauthProviderId: string }>> = {
-  anthropic: [
-    { value: "claude-cli", label: "Claude Code Setup Token", oauthProviderId: "anthropic" },
-  ],
   openai: [
     { value: "openai-codex", label: "OpenAI Codex OAuth", oauthProviderId: "openai-codex" },
   ],
   google: [
     { value: "google-gemini-cli", label: "Gemini CLI OAuth", oauthProviderId: "google-gemini-cli" },
-    { value: "google-antigravity", label: "Antigravity OAuth", oauthProviderId: "google-antigravity" },
   ],
 };
 
@@ -21,7 +17,44 @@ const MODEL_PROVIDER_OVERRIDE_BY_AUTH_METHOD: Record<string, string> = {
 
 const BASE_PROVIDER_BY_MODEL_PROVIDER: Record<string, string> = {
   "openai-codex": "openai",
+  "google-vertex": "google",
 };
+
+const LEGACY_AUTH_METHOD_BY_PROVIDER: Record<string, Record<string, string>> = {
+  anthropic: {
+    "claude-cli": "setup-token",
+  },
+  google: {
+    "google-antigravity": "token",
+  },
+};
+
+function getTokenAuthOptions(provider: string): Array<{ value: string; label: string; description: string }> {
+  const options = [{
+    value: "token",
+    label: provider === "google" ? "Gemini API Key" : "API Key",
+    description: provider === "google"
+      ? "Paste a Gemini API key for this provider."
+      : "Paste an API key or token for this provider.",
+  }];
+
+  if (provider === "anthropic") {
+    options.push({
+      value: "setup-token",
+      label: "Claude Code Setup Token",
+      description: "Paste a token from `claude setup-token`.",
+    });
+  }
+
+  return options;
+}
+
+function getSupportedAuthMethod(provider: string, authMethod: string): string {
+  const allowed = new Set(getProviderAuthOptions(provider).map((option) => option.value));
+  const legacyMethod = LEGACY_AUTH_METHOD_BY_PROVIDER[provider]?.[authMethod];
+  const candidate = legacyMethod || authMethod;
+  return allowed.has(candidate) ? candidate : "token";
+}
 
 export function getBaseProvider(provider: string): string {
   return BASE_PROVIDER_BY_MODEL_PROVIDER[provider] || provider;
@@ -101,17 +134,41 @@ export function createDefaultProviderAuth(provider: string): ProviderAuthConfig 
 }
 
 export function normalizeProviderAuths(providerAuths: Record<string, ProviderAuthConfig> | undefined, provider: string, apiKey: string, authMethod: string): Record<string, ProviderAuthConfig> {
-  const next = { ...(providerAuths || {}) };
-  if (!next[provider]) {
-    next[provider] = createDefaultProviderAuth(provider);
+  const next: Record<string, ProviderAuthConfig> = {};
+
+  for (const [rawProvider, rawAuth] of Object.entries(providerAuths || {})) {
+    const normalizedProvider = getBaseProvider(rawProvider);
+    const normalizedMethod = getSupportedAuthMethod(normalizedProvider, rawAuth.auth_method);
+    const oauthOption = OAUTH_METHODS_BY_PROVIDER[normalizedProvider]?.find((option) => option.value === normalizedMethod);
+    const normalizedAuth: ProviderAuthConfig = {
+      ...createDefaultProviderAuth(normalizedProvider),
+      ...rawAuth,
+      auth_method: normalizedMethod,
+      oauth_provider_id: oauthOption?.oauthProviderId ?? null,
+      profile_key: oauthOption ? rawAuth.profile_key : null,
+      profile: oauthOption ? rawAuth.profile : null,
+    };
+    next[normalizedProvider] = normalizedAuth;
   }
+
+  const normalizedProvider = getBaseProvider(provider);
+  if (!next[normalizedProvider]) {
+    next[normalizedProvider] = createDefaultProviderAuth(normalizedProvider);
+  }
+
   if (apiKey || authMethod !== "token") {
-    next[provider] = {
-      ...next[provider],
-      auth_method: authMethod || next[provider].auth_method,
-      token: apiKey || next[provider].token,
+    const normalizedMethod = getSupportedAuthMethod(normalizedProvider, authMethod);
+    const oauthOption = OAUTH_METHODS_BY_PROVIDER[normalizedProvider]?.find((option) => option.value === normalizedMethod);
+    next[normalizedProvider] = {
+      ...next[normalizedProvider],
+      auth_method: normalizedMethod,
+      token: apiKey || next[normalizedProvider].token,
+      oauth_provider_id: oauthOption?.oauthProviderId ?? null,
+      profile_key: oauthOption ? next[normalizedProvider].profile_key : null,
+      profile: oauthOption ? next[normalizedProvider].profile : null,
     };
   }
+
   return next;
 }
 
@@ -138,19 +195,13 @@ export function buildReferencedProviders(input: {
 }
 
 export function getProviderAuthOptions(provider: string): Array<{ value: string; label: string; description: string }> {
-  const options = [{ value: "token", label: "API Key", description: "Paste an API key or token for this provider." }];
-
-  if (provider === "anthropic") {
-    options.push({ value: "setup-token", label: "Setup Token", description: "Paste a token from `claude setup-token`." });
-  }
+  const options = [...getTokenAuthOptions(provider)];
 
   for (const oauthOption of OAUTH_METHODS_BY_PROVIDER[provider] || []) {
     options.push({
       value: oauthOption.value,
       label: oauthOption.label,
-      description: provider === "anthropic"
-        ? "Open a terminal and run the Claude Code setup-token flow."
-        : "Launch the provider auth flow in your browser and import the resulting profile.",
+      description: "Launch the provider auth flow in your browser and import the resulting profile.",
     });
   }
 
@@ -158,7 +209,7 @@ export function getProviderAuthOptions(provider: string): Array<{ value: string;
 }
 
 export function isOAuthMethod(authMethod: string): boolean {
-  return authMethod !== "token" && authMethod !== "setup-token";
+  return Object.values(OAUTH_METHODS_BY_PROVIDER).some((options) => options.some((option) => option.value === authMethod));
 }
 
 export interface DeferredOAuthItem {

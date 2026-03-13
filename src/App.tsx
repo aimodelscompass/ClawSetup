@@ -9,7 +9,7 @@ import { AVAILABLE_SKILLS } from "./presets/availableSkills";
 import { AGENT_TYPE_PRESETS } from "./presets/agentPresets";
 import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
-import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
+import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProvider, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import ToolPolicyEditor from "./components/ToolPolicyEditor";
 import { DEFAULT_TOOL_POLICY, deriveToolPolicyFromLegacy, getSkillIdSet, normalizeSkillAndToolSelection, normalizeToolPolicy } from "./utils/toolSelection";
 import Dropdown from "./components/Dropdown";
@@ -334,24 +334,26 @@ function App() {
   }, [identityMd, userMd, soulMd, initialWorkspace]);
 
   function updateProviderAuth(targetProvider: string, patch: Partial<ProviderAuthConfig> | ((current: ProviderAuthConfig) => ProviderAuthConfig)) {
+    const normalizedProvider = getBaseProvider(targetProvider);
     setProviderAuths(prev => {
-      const current = prev[targetProvider] || createDefaultProviderAuth(targetProvider);
+      const current = prev[normalizedProvider] || createDefaultProviderAuth(normalizedProvider);
       const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
-      return { ...prev, [targetProvider]: next };
+      return { ...prev, [normalizedProvider]: next };
     });
   }
 
   function getProviderAuth(targetProvider: string): ProviderAuthConfig {
-    return providerAuths[targetProvider] || createDefaultProviderAuth(targetProvider);
+    return providerAuths[getBaseProvider(targetProvider)] || createDefaultProviderAuth(getBaseProvider(targetProvider));
   }
 
   function setProviderAuthMethod(targetProvider: string, value: string) {
-    const oauthOption = OAUTH_METHODS_BY_PROVIDER[targetProvider]?.find(option => option.value === value);
+    const normalizedProvider = getBaseProvider(targetProvider);
+    const oauthOption = OAUTH_METHODS_BY_PROVIDER[normalizedProvider]?.find(option => option.value === value);
     setProviderAuths(prev => {
-      const current = prev[targetProvider] || createDefaultProviderAuth(targetProvider);
+      const current = prev[normalizedProvider] || createDefaultProviderAuth(normalizedProvider);
       const nextProviderAuths = {
         ...prev,
-        [targetProvider]: {
+        [normalizedProvider]: {
           ...current,
           auth_method: value,
           oauth_provider_id: oauthOption?.oauthProviderId ?? null,
@@ -366,11 +368,11 @@ function App() {
   }
 
   function getProviderDefaultModel(targetProvider: string, auths: Record<string, ProviderAuthConfig> = providerAuths): string {
-    return getDefaultModelForProvider(targetProvider, auths, DEFAULT_MODELS);
+    return getDefaultModelForProvider(getBaseProvider(targetProvider), auths, DEFAULT_MODELS);
   }
 
   function getProviderModelOptions(targetProvider: string, auths: Record<string, ProviderAuthConfig> = providerAuths) {
-    return getDisplayModelOptions(targetProvider, auths, MODELS_BY_PROVIDER);
+    return getDisplayModelOptions(getBaseProvider(targetProvider), auths, MODELS_BY_PROVIDER);
   }
 
   function remapAllModelSelections(nextProviderAuths: Record<string, ProviderAuthConfig>) {
@@ -452,32 +454,57 @@ function App() {
     setOauthCompletionRunning(false);
   }
 
-  function renderProviderAuthEditor(targetProvider: string) {
-    const auth = getProviderAuth(targetProvider);
-    const authOptions = getProviderAuthOptions(targetProvider);
+  function renderProviderAuthEditor(targetProvider: string, options?: { keyPrefix?: string; showProviderLabel?: boolean; showMissingWarning?: boolean; marginTop?: string }) {
+    const normalizedProvider = getBaseProvider(targetProvider);
+    const auth = getProviderAuth(normalizedProvider);
+    const authOptions = getProviderAuthOptions(normalizedProvider);
+    const selectedAuthOption = authOptions.find((option) => option.value === auth.auth_method);
     const hasCredential = isOAuthMethod(auth.auth_method) ? !!auth.profile_key : !!auth.token;
-    const providerQueueItem = deferredOAuthQueue.find(item => item.source === "provider" && item.targetProvider === targetProvider);
+    const providerQueueItem = deferredOAuthQueue.find(item => item.source === "provider" && item.targetProvider === normalizedProvider);
     const completionResult = providerQueueItem ? oauthCompletionResults[providerQueueItem.id] : null;
+    const showProviderLabel = options?.showProviderLabel ?? true;
+    const showMissingWarning = options?.showMissingWarning ?? true;
+    const buttonStyle = { fontSize: "0.85rem", padding: "0.45rem 0.75rem" };
 
     return (
-      <div key={targetProvider} className="form-group" style={{ marginTop: "1rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "12px" }}>
-        <label>{targetProvider.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")} Authentication</label>
-        <Dropdown
-          value={auth.auth_method}
-          onChange={(value) => setProviderAuthMethod(targetProvider, value)}
-          options={authOptions}
-        />
+      <div key={`${options?.keyPrefix || "provider-auth"}-${normalizedProvider}`} className="form-group" style={{ marginTop: options?.marginTop || "1rem" }}>
+        {showProviderLabel && (
+          <label>{normalizedProvider.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")}</label>
+        )}
+
+        {authOptions.length > 1 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: showProviderLabel ? "0.5rem" : "0" }}>
+            {authOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={auth.auth_method === option.value ? "primary" : "secondary"}
+                style={buttonStyle}
+                onClick={() => setProviderAuthMethod(normalizedProvider, option.value)}
+                disabled={providerAuthBusy[normalizedProvider]}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedAuthOption?.description && (
+          <p className="input-hint" style={{ marginTop: "0.5rem" }}>
+            {selectedAuthOption.description}
+          </p>
+        )}
 
         {(auth.auth_method === "token" || auth.auth_method === "setup-token") && (
           <div style={{ marginTop: "0.75rem" }}>
             <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-              {auth.auth_method === "setup-token" ? "Setup Token" : "API Key"}
+              {auth.auth_method === "setup-token" ? "Claude Code Setup Token" : normalizedProvider === "google" ? "Gemini API Key" : "API Key"}
             </label>
             <input
               type="password"
-              placeholder={auth.auth_method === "setup-token" ? "Paste `claude setup-token` output" : `Paste your ${targetProvider} API key`}
+              placeholder={auth.auth_method === "setup-token" ? "Paste `claude setup-token` output" : normalizedProvider === "google" ? "Paste your Gemini API key" : `Paste your ${normalizedProvider} API key`}
               value={auth.token}
-              onChange={(e) => updateProviderAuth(targetProvider, { token: e.target.value })}
+              onChange={(e) => updateProviderAuth(normalizedProvider, { token: e.target.value })}
               autoComplete="off"
             />
           </div>
@@ -505,15 +532,15 @@ function App() {
           </div>
         )}
 
-        {!hasCredential && (
+        {showMissingWarning && !hasCredential && (
           <p className="input-hint" style={{ marginTop: "0.5rem", color: "var(--warning, #b45309)" }}>
-            Missing authentication for {targetProvider}. You can continue and configure it later, but this provider will not work until auth is supplied.
+            Missing authentication for {normalizedProvider}. You can continue and configure it later, but this provider will not work until auth is supplied.
           </p>
         )}
 
-        {providerAuthErrors[targetProvider] && (
+        {providerAuthErrors[normalizedProvider] && (
           <p className="input-hint" style={{ marginTop: "0.5rem", color: "var(--danger, #dc2626)" }}>
-            {providerAuthErrors[targetProvider]}
+            {providerAuthErrors[normalizedProvider]}
           </p>
         )}
       </div>
@@ -753,9 +780,13 @@ function App() {
   // into the structure expected by configure_agent, for comparison.
   function transformInitialToPayload(initial: any) {
     if (!initial) return null;
-    const initialProviderAuths =
-      initial.provider_auths ||
-      normalizeProviderAuths({}, initial.provider, initial.api_key || "", initial.auth_method || "token");
+    const normalizedProvider = getBaseProvider(initial.provider);
+    const initialProviderAuths = normalizeProviderAuths(
+      initial.provider_auths,
+      normalizedProvider,
+      initial.api_key || "",
+      initial.auth_method || "token",
+    );
     const normalizedTopLevelSelection = normalizeSkillAndToolSelection(
       initial.skills || [],
       initial.allowed_tools || [],
@@ -775,9 +806,9 @@ Managed by Clawnetes.`;
     const mappedSandboxMode = initial.sandbox_mode === "full" ? "all" : (initial.sandbox_mode === "partial" ? "non-main" : (initial.sandbox_mode === "none" ? "off" : initial.sandbox_mode));
 
     return {
-      provider: initial.provider,
-      api_key: initial.api_key,
-      auth_method: initial.auth_method,
+      provider: normalizedProvider,
+      api_key: initialProviderAuths[normalizedProvider]?.token || initial.api_key,
+      auth_method: initialProviderAuths[normalizedProvider]?.auth_method || initial.auth_method,
       model: applyModelProviderAuth(initial.model, initialProviderAuths),
       user_name: initial.user_name,
       agent_name: initial.agent_name,
@@ -1228,17 +1259,18 @@ Managed by Clawnetes.`,
 
       const config: any = await invoke("get_current_config", { remote: remoteConfig });
       initialConfigRef.current = config;
+      const normalizedProvider = getBaseProvider(config.provider);
       const normalizedProviderAuths = normalizeProviderAuths(
         config.provider_auths,
-        config.provider,
+        normalizedProvider,
         config.api_key || "",
         config.auth_method || "token",
       );
 
       // Populate state
-      setProvider(config.provider);
-      setApiKey(config.api_key);
-      setAuthMethod(config.auth_method);
+      setProvider(normalizedProvider);
+      setApiKey(normalizedProviderAuths[normalizedProvider]?.token || config.api_key);
+      setAuthMethod(normalizedProviderAuths[normalizedProvider]?.auth_method || config.auth_method);
       setProviderAuths(normalizedProviderAuths);
       setModel(normalizeModelRefForUi(config.model, normalizedProviderAuths));
       setUserName(config.user_name);
@@ -2127,7 +2159,6 @@ Managed by Clawnetes.`,
                   { value: "anthropic", label: "Anthropic", icon: PROVIDER_LOGOS["anthropic"] },
                   { value: "openai", label: "OpenAI", icon: PROVIDER_LOGOS["openai"] },
                   { value: "google", label: "Google Gemini", icon: PROVIDER_LOGOS["google"] },
-                  { value: "google-vertex", label: "Google Vertex AI", icon: PROVIDER_LOGOS["google-vertex"] },
                   { value: "openrouter", label: "OpenRouter", icon: PROVIDER_LOGOS["openrouter"] },
                   { value: "xai", label: "xAI (Grok)", icon: PROVIDER_LOGOS["xai"] },
                   { value: "ollama", label: "Ollama (Local)", icon: PROVIDER_LOGOS["ollama"] },
@@ -2137,14 +2168,7 @@ Managed by Clawnetes.`,
               />
             </div>
 
-            <div className="form-group" style={{ marginTop: "1.5rem" }}>
-              <label>Auth Method</label>
-              <Dropdown
-                value={getProviderAuth(provider).auth_method}
-                onChange={(value) => setProviderAuthMethod(provider, value)}
-                options={getProviderAuthOptions(provider)}
-              />
-            </div>
+            {renderProviderAuthEditor(provider, { keyPrefix: "primary-provider", showProviderLabel: false, marginTop: "1.5rem" })}
 
             {/* LM Studio base URL input */}
             {provider === "lmstudio" && (

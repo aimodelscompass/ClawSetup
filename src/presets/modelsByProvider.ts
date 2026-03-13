@@ -4,7 +4,6 @@ export const DEFAULT_MODELS: Record<string, string> = {
   "anthropic": "anthropic/claude-opus-4-6",
   "openai": "openai/gpt-5.4",
   "google": "google/gemini-3.1-pro-preview",
-  "google-vertex": "google-vertex/gemini-3.1-pro-preview",
   "openrouter": "openrouter/anthropic/claude-opus-4.6",
   "xai": "xai/grok-4.1-fast",
   "ollama": "ollama/llama3.2",
@@ -442,68 +441,6 @@ export const MODELS_BY_PROVIDER: Record<string, ModelOption[]> = {
       "value": "google/gemini-live-2.5-flash-preview-native-audio",
       "label": "Gemini Live 2.5 Flash Preview Native Audio",
       "description": "Input: text • Ctx: 131k"
-    }
-  ],
-  "google-vertex": [
-    {
-      "value": "google-vertex/gemini-1.5-flash",
-      "label": "Gemini 1.5 Flash (Vertex)",
-      "description": "Input: text+image • Ctx: 1000k"
-    },
-    {
-      "value": "google-vertex/gemini-1.5-flash-8b",
-      "label": "Gemini 1.5 Flash-8B (Vertex)",
-      "description": "Input: text+image • Ctx: 1000k"
-    },
-    {
-      "value": "google-vertex/gemini-1.5-pro",
-      "label": "Gemini 1.5 Pro (Vertex)",
-      "description": "Input: text+image • Ctx: 1000k"
-    },
-    {
-      "value": "google-vertex/gemini-2.0-flash",
-      "label": "Gemini 2.0 Flash (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-2.0-flash-lite",
-      "label": "Gemini 2.0 Flash Lite (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-2.5-flash",
-      "label": "Gemini 2.5 Flash (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-2.5-flash-lite",
-      "label": "Gemini 2.5 Flash Lite (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-2.5-flash-lite-preview-09-2025",
-      "label": "Gemini 2.5 Flash Lite Preview 09-25 (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-2.5-pro",
-      "label": "Gemini 2.5 Pro (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-3-flash-preview",
-      "label": "Gemini 3 Flash Preview (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
-    },
-    {
-      "value": "google-vertex/gemini-3-pro-preview",
-      "label": "Gemini 3 Pro Preview (Vertex)",
-      "description": "Input: text+image • Ctx: 1000k"
-    },
-    {
-      "value": "google-vertex/gemini-3.1-pro-preview",
-      "label": "Gemini 3.1 Pro Preview (Vertex)",
-      "description": "Input: text+image • Ctx: 1049k"
     }
   ],
   "openrouter": [
@@ -1925,7 +1862,6 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   "github-copilot": "/images/github.svg",
   "google-antigravity": "/images/google.svg",
   "google-gemini-cli": "/images/google.svg",
-  "google-vertex": "/images/google.svg",
   "groq": "/images/groq.svg",
   "huggingface": "/images/huggingface.svg",
   "kimi-coding": "/images/moonshot.svg",

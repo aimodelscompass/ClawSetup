@@ -279,17 +279,15 @@ fn default_provider_auth(
 }
 
 fn normalize_auth_mode(auth_method: &str) -> String {
-    if auth_method == "setup-token" {
+    if auth_method == "setup-token" || auth_method == "claude-cli" {
         "token".to_string()
     } else if matches!(
         auth_method,
         "antigravity"
             | "gemini_cli"
             | "codex"
-            | "claude-cli"
             | "openai-codex"
             | "google-gemini-cli"
-            | "google-antigravity"
     ) {
         "oauth".to_string()
     } else {
@@ -300,6 +298,7 @@ fn normalize_auth_mode(auth_method: &str) -> String {
 fn normalize_provider_for_ui(provider: &str) -> String {
     match provider {
         "openai-codex" => "openai".to_string(),
+        "google-vertex" => "google".to_string(),
         _ => provider.to_string(),
     }
 }
@@ -461,9 +460,7 @@ fn oauth_provider_matches(base_provider: &str, provider_id: &str) -> bool {
         (base_provider, provider_id),
         ("openai", "openai-codex")
             | ("google", "google-gemini-cli")
-            | ("google", "google-antigravity")
             | ("anthropic", "anthropic")
-            | ("google-vertex", "google-vertex")
     ) || base_provider == provider_id
 }
 
@@ -564,10 +561,8 @@ fn resolve_provider_auth_data(
         match oauth_provider_id.as_deref() {
             Some("openai-codex") => "openai-codex".to_string(),
             Some("google-gemini-cli") => "google-gemini-cli".to_string(),
-            Some("google-antigravity") => "google-antigravity".to_string(),
-            Some("google-vertex") => "google-vertex".to_string(),
             Some(other) => other.to_string(),
-            None if base_provider == "anthropic" => "claude-cli".to_string(),
+            None if base_provider == "anthropic" => "setup-token".to_string(),
             None => raw_auth_method.clone(),
         }
     } else {
@@ -591,19 +586,11 @@ fn oauth_callback_port(oauth_provider_id: &str) -> Option<u16> {
     match oauth_provider_id {
         "openai-codex" => Some(1455),
         "google-gemini-cli" => Some(8085),
-        "google-antigravity" => Some(51121),
         _ => None,
     }
 }
 
-fn build_provider_auth_command(provider: &str, method: &str, oauth_provider_id: &str) -> String {
-    if provider == "anthropic" || method == "claude-cli" {
-        return format!(
-            "openclaw models auth setup-token --provider {} --yes",
-            shell_single_quote("anthropic")
-        );
-    }
-
+fn build_provider_auth_command(_provider: &str, method: &str, oauth_provider_id: &str) -> String {
     let mut cmd = format!(
         "openclaw models auth login --provider {}",
         shell_single_quote(oauth_provider_id)
@@ -5512,7 +5499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_provider_auth_data_maps_anthropic_oauth_to_claude_cli() {
+    fn test_resolve_provider_auth_data_maps_anthropic_oauth_to_setup_token() {
         let auth_config = serde_json::json!({
             "profiles": {
                 "anthropic:default": {
@@ -5528,7 +5515,7 @@ mod tests {
 
         let resolved = resolve_provider_auth_data("anthropic", &auth_config)
             .expect("provider auth should resolve");
-        assert_eq!(resolved.auth_method, "claude-cli");
+        assert_eq!(resolved.auth_method, "setup-token");
         assert_eq!(resolved.token, "anthropic-access");
     }
 
@@ -5544,10 +5531,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_provider_auth_command_uses_setup_token_for_anthropic() {
+    fn test_build_provider_auth_command_uses_plugin_login_for_gemini_cli() {
         assert_eq!(
-            build_provider_auth_command("anthropic", "claude-cli", "anthropic"),
-            "openclaw models auth setup-token --provider 'anthropic' --yes"
+            build_provider_auth_command("google", "google-gemini-cli", "google-gemini-cli"),
+            "openclaw models auth login --provider 'google-gemini-cli'"
         );
     }
 
@@ -5615,21 +5602,21 @@ mod tests {
     fn test_oauth_callback_port_mapping() {
         assert_eq!(oauth_callback_port("openai-codex"), Some(1455));
         assert_eq!(oauth_callback_port("google-gemini-cli"), Some(8085));
-        assert_eq!(oauth_callback_port("google-antigravity"), Some(51121));
         assert_eq!(oauth_callback_port("anthropic"), None);
     }
 
     #[test]
     fn test_normalize_auth_mode_maps_oauth_variants() {
         assert_eq!(normalize_auth_mode("openai-codex"), "oauth");
-        assert_eq!(normalize_auth_mode("claude-cli"), "oauth");
+        assert_eq!(normalize_auth_mode("claude-cli"), "token");
         assert_eq!(normalize_auth_mode("setup-token"), "token");
         assert_eq!(normalize_auth_mode("token"), "token");
     }
 
     #[test]
-    fn test_normalize_provider_for_ui_maps_openai_codex() {
+    fn test_normalize_provider_for_ui_maps_openai_codex_and_google_vertex() {
         assert_eq!(normalize_provider_for_ui("openai-codex"), "openai");
+        assert_eq!(normalize_provider_for_ui("google-vertex"), "google");
         assert_eq!(normalize_provider_for_ui("openai"), "openai");
     }
 
