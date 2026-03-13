@@ -10,6 +10,7 @@ import { AGENT_TYPE_PRESETS } from "./presets/agentPresets";
 import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
 import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
+import { CORE_TOOL_OPTIONS, getSkillIdSet, normalizeSkillAndToolSelection, sanitizeAllowedTools } from "./utils/toolSelection";
 import Dropdown from "./components/Dropdown";
 import type { AgentTypeId, AgentConfigData, BusinessFunctionId, CronJobConfig, ProviderAuthConfig } from "./types";
 
@@ -195,6 +196,7 @@ function App() {
 
 
   const availableSkills = AVAILABLE_SKILLS;
+  const availableSkillIds = getSkillIdSet(availableSkills);
 
   // Apply agent type preset - sets all relevant state from a preset
   function applyAgentTypePreset(typeId: AgentTypeId) {
@@ -731,13 +733,16 @@ function App() {
   function normalizeForComparison(payload: any) {
     if (!payload) return payload;
     const effectiveToolsMode = payload.tools_mode ?? "allowlist";
+    const normalizedAllowedTools = effectiveToolsMode === "allowlist"
+      ? sanitizeAllowedTools(payload.allowed_tools, availableSkillIds)
+      : payload.allowed_tools;
     return {
       ...payload,
       sandbox_mode: payload.sandbox_mode ?? "off",
       tools_mode: effectiveToolsMode,
       allowed_tools: effectiveToolsMode === "allowlist"
-        ? (payload.allowed_tools ?? ["filesystem", "terminal", "browser"])
-        : payload.allowed_tools,
+        ? (normalizedAllowedTools.length > 0 ? normalizedAllowedTools : ["filesystem", "terminal", "browser"])
+        : normalizedAllowedTools,
       denied_tools: effectiveToolsMode === "denylist"
         ? (payload.denied_tools ?? [])
         : null,
@@ -755,6 +760,11 @@ function App() {
     const initialProviderAuths =
       initial.provider_auths ||
       normalizeProviderAuths({}, initial.provider, initial.api_key || "", initial.auth_method || "token");
+    const normalizedTopLevelSelection = normalizeSkillAndToolSelection(
+      initial.skills || [],
+      initial.tools_mode === "allowlist" ? (initial.allowed_tools || []) : [],
+      availableSkillIds,
+    );
     const defaultIdentity = `# IDENTITY.md - Who Am I?
 - **Name:** ${initial.agent_name}
 - **Emoji:** ${initial.agent_emoji || "🦞"}
@@ -777,12 +787,12 @@ Managed by Clawnetes.`;
       gateway_auth_mode: initial.gateway_auth_mode,
       tailscale_mode: initial.tailscale_mode,
       node_manager: initial.node_manager,
-      skills: initial.skills || [],
+      skills: normalizedTopLevelSelection.skills,
       service_keys: initial.service_keys || {},
       provider_auths: initialProviderAuths,
       sandbox_mode: mappedSandboxMode,
       tools_mode: initial.tools_mode,
-      allowed_tools: initial.tools_mode === "allowlist" ? (initial.allowed_tools || []) : null,
+      allowed_tools: initial.tools_mode === "allowlist" ? normalizedTopLevelSelection.allowedTools : null,
       denied_tools: initial.tools_mode === "denylist" ? (initial.denied_tools || []) : null,
       fallback_models: (initial.fallback_models && initial.fallback_models.length > 0)
         ? initial.fallback_models.map((model: string) => applyModelProviderAuth(model, initialProviderAuths))
@@ -792,25 +802,33 @@ Managed by Clawnetes.`;
       identity_md: initial.identity_md || defaultIdentity,
       user_md: initial.user_md || null,
       soul_md: initial.soul_md || null,
-      agents: initial.enable_multi_agent && initial.agent_configs ? initial.agent_configs.map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        model: applyModelProviderAuth(a.model, initialProviderAuths),
-        fallback_models: (a.fallback_models && a.fallback_models.length > 0)
-          ? a.fallback_models.map((model: string) => applyModelProviderAuth(model, initialProviderAuths))
-          : null,
-        skills: (a.skills && a.skills.length > 0) ? a.skills : null,
-        vibe: a.vibe || "",
-        identity_md: a.identity_md || `# IDENTITY.md - Who Am I?
+      agents: initial.enable_multi_agent && initial.agent_configs ? initial.agent_configs.map((a: any) => {
+        const normalizedAgentSelection = normalizeSkillAndToolSelection(
+          a.skills || [],
+          a.allowed_tools || [],
+          availableSkillIds,
+        );
+
+        return {
+          id: a.id,
+          name: a.name,
+          model: applyModelProviderAuth(a.model, initialProviderAuths),
+          fallback_models: (a.fallback_models && a.fallback_models.length > 0)
+            ? a.fallback_models.map((model: string) => applyModelProviderAuth(model, initialProviderAuths))
+            : null,
+          skills: normalizedAgentSelection.skills.length > 0 ? normalizedAgentSelection.skills : null,
+          vibe: a.vibe || "",
+          identity_md: a.identity_md || `# IDENTITY.md - Who Am I?
 - **Name:** ${a.name}
 - **Emoji:** ${a.emoji || "🦞"}
 ---
 Managed by Clawnetes.`,
-        user_md: a.user_md || null,
-        soul_md: a.soul_md || null,
-        tools_md: a.tools_md || null,
-        agents_md: a.agents_md || null,
-      })) : null,
+          user_md: a.user_md || null,
+          soul_md: a.soul_md || null,
+          tools_md: a.tools_md || null,
+          agents_md: a.agents_md || null,
+        };
+      }) : null,
       preserve_state: isPaired,
       agent_type: initial.agent_type || "custom",
       tools_md: initial.tools_md || null,
@@ -839,6 +857,7 @@ Managed by Clawnetes.`;
 
     // For preset agents, always include preset-configured fields
     const usePresetFields = isPresetAgent || mode === "advanced";
+    const sanitizedTopLevelAllowedTools = sanitizeAllowedTools(allowedTools, availableSkillIds);
 
     return {
       provider,
@@ -859,7 +878,7 @@ Managed by Clawnetes.`;
       provider_auths: effectiveProviderAuths,
       sandbox_mode: usePresetFields ? mappedSandboxMode : null,
       tools_mode: usePresetFields ? toolsMode : null,
-      allowed_tools: usePresetFields && toolsMode === "allowlist" ? allowedTools : null,
+      allowed_tools: usePresetFields && toolsMode === "allowlist" ? sanitizedTopLevelAllowedTools : null,
       denied_tools: usePresetFields && toolsMode === "denylist" ? deniedTools : null,
       fallback_models: usePresetFields && enableFallbacks
         ? fallbackModels.filter(m => m).map(m => applyModelProviderAuth(m, effectiveProviderAuths))
@@ -869,25 +888,33 @@ Managed by Clawnetes.`;
       identity_md: (usePresetFields && identityMd) ? identityMd : defaultIdentity,
       user_md: usePresetFields && userMd ? userMd : null,
       soul_md: usePresetFields && soulMd ? soulMd : null,
-      agents: enableMultiAgent ? agentConfigs.map(a => ({
-        id: a.id,
-        name: a.name,
-        model: applyModelProviderAuth(a.model, effectiveProviderAuths),
-        fallback_models: a.fallbackModels.length > 0
-          ? a.fallbackModels.map(m => applyModelProviderAuth(m, effectiveProviderAuths))
-          : null,
-        skills: a.skills.length > 0 ? a.skills : null,
-        vibe: a.vibe,
-        identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
+      agents: enableMultiAgent ? agentConfigs.map(a => {
+        const normalizedAgentSelection = normalizeSkillAndToolSelection(
+          a.skills,
+          a.allowedTools,
+          availableSkillIds,
+        );
+
+        return {
+          id: a.id,
+          name: a.name,
+          model: applyModelProviderAuth(a.model, effectiveProviderAuths),
+          fallback_models: a.fallbackModels.length > 0
+            ? a.fallbackModels.map(m => applyModelProviderAuth(m, effectiveProviderAuths))
+            : null,
+          skills: normalizedAgentSelection.skills.length > 0 ? normalizedAgentSelection.skills : null,
+          vibe: a.vibe,
+          identity_md: a.identityMd || `# IDENTITY.md - Who Am I?
 - **Name:** ${a.name}
 - **Emoji:** ${a.emoji || "🦞"}
 ---
 Managed by Clawnetes.`,
-        user_md: a.userMd || null,
-        soul_md: a.soulMd || null,
-        tools_md: a.toolsMd || null,
-        agents_md: a.agentsMd || null,
-      })) : null,
+          user_md: a.userMd || null,
+          soul_md: a.soulMd || null,
+          tools_md: a.toolsMd || null,
+          agents_md: a.agentsMd || null,
+        };
+      }) : null,
       preserve_state: isPaired,
       // New preset fields
       agent_type: agentType,
@@ -1204,13 +1231,18 @@ Managed by Clawnetes.`,
       setTailscaleMode(config.tailscale_mode);
       setNodeManager(config.node_manager);
 
-      setSelectedSkills(config.skills);
+      const normalizedTopLevelSelection = normalizeSkillAndToolSelection(
+        config.skills,
+        config.allowed_tools,
+        availableSkillIds,
+      );
+      setSelectedSkills(normalizedTopLevelSelection.skills);
       // Service keys might be partial, merge them?
       setServiceKeys(config.service_keys);
 
       setSandboxMode(config.sandbox_mode);
       setToolsMode(config.tools_mode);
-      setAllowedTools(config.allowed_tools);
+      setAllowedTools(normalizedTopLevelSelection.allowedTools);
       setDeniedTools(config.denied_tools);
 
       setFallbackModels(config.fallback_models.map((modelRef: string) => normalizeModelRefForUi(modelRef, normalizedProviderAuths)));
@@ -1253,22 +1285,30 @@ Managed by Clawnetes.`,
       setEnableMultiAgent(config.enable_multi_agent);
       if (config.enable_multi_agent && config.agent_configs) {
         setNumAgents(config.agent_configs.length);
-        setAgentConfigs(config.agent_configs.map((a: any) => ({
-          id: a.id,
-          name: a.name,
-          model: normalizeModelRefForUi(a.model, normalizedProviderAuths),
-          fallbackModels: (a.fallback_models || []).map((modelRef: string) => normalizeModelRefForUi(modelRef, normalizedProviderAuths)),
-          skills: a.skills || [],
-          vibe: a.vibe,
-          emoji: a.emoji || "🦞",
-          identityMd: a.identity_md || "",
-          userMd: a.user_md || "",
-          soulMd: a.soul_md || "",
-          toolsMd: a.tools_md || "",
-          agentsMd: a.agents_md || "",
-          allowedTools: a.allowed_tools || [],
-          cronJobs: a.cron_jobs || [],
-        })));
+        setAgentConfigs(config.agent_configs.map((a: any) => {
+          const normalizedAgentSelection = normalizeSkillAndToolSelection(
+            a.skills,
+            a.allowed_tools,
+            availableSkillIds,
+          );
+
+          return {
+            id: a.id,
+            name: a.name,
+            model: normalizeModelRefForUi(a.model, normalizedProviderAuths),
+            fallbackModels: (a.fallback_models || []).map((modelRef: string) => normalizeModelRefForUi(modelRef, normalizedProviderAuths)),
+            skills: normalizedAgentSelection.skills,
+            vibe: a.vibe,
+            emoji: a.emoji || "🦞",
+            identityMd: a.identity_md || "",
+            userMd: a.user_md || "",
+            soulMd: a.soul_md || "",
+            toolsMd: a.tools_md || "",
+            agentsMd: a.agents_md || "",
+            allowedTools: normalizedAgentSelection.allowedTools,
+            cronJobs: a.cron_jobs || [],
+          };
+        }));
       }
 
       if (config.is_paired !== undefined) {
@@ -2521,14 +2561,9 @@ Managed by Clawnetes.`,
 
             {toolsMode === "allowlist" && (
               <div className="form-group" style={{ marginTop: "1rem" }}>
-                <label>Core Tools</label>
+                <label>Allowed Tools</label>
                 <div className="skills-grid">
-                  {[
-                    { id: "filesystem", name: "File System" },
-                    { id: "terminal", name: "Terminal" },
-                    { id: "browser", name: "Browser" },
-                    { id: "network", name: "Network" }
-                  ].map(tool => (
+                  {CORE_TOOL_OPTIONS.map(tool => (
                     <div
                       key={tool.id}
                       className={`skill-card ${allowedTools.includes(tool.id) ? "active" : ""}`}
@@ -2541,35 +2576,6 @@ Managed by Clawnetes.`,
                       }}
                     >
                       <div className="skill-name">{tool.name}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <label style={{ marginTop: "1rem" }}>Skills as Tools</label>
-                <div className="skills-grid" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {availableSkills.map(skill => (
-                    <div
-                      key={skill.id}
-                      className={`skill-card ${allowedTools.includes(skill.id) ? "active" : ""}`}
-                      onClick={() => {
-                        setAllowedTools(prev =>
-                          prev.includes(skill.id)
-                            ? prev.filter(t => t !== skill.id)
-                            : [...prev, skill.id]
-                        );
-                      }}
-                      style={{ padding: "0.75rem" }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center" }}>
-                        {SKILL_ICONS[skill.id] && (
-                          <img
-                            src={SKILL_ICONS[skill.id]}
-                            alt=""
-                            style={{ width: "16px", height: "16px", objectFit: "contain", borderRadius: "3px", backgroundColor: "white", padding: "1px", marginRight: "6px" }}
-                          />
-                        )}
-                        <div className="skill-name" style={{ fontSize: "0.85rem" }}>{skill.name}</div>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -2684,12 +2690,7 @@ Managed by Clawnetes.`,
               <div className="form-group">
                 <label>Allowed Tools</label>
                 <div className="skills-grid">
-                  {[
-                    { id: "filesystem", name: "File System" },
-                    { id: "terminal", name: "Terminal" },
-                    { id: "browser", name: "Browser" },
-                    { id: "network", name: "Network" }
-                  ].map(tool => (
+                  {CORE_TOOL_OPTIONS.map(tool => (
                     <div
                       key={tool.id}
                       className={`skill-card ${allowedTools.includes(tool.id) ? "active" : ""}`}
@@ -3228,14 +3229,6 @@ Managed by Clawnetes.`,
           fallbackModels: currentAgent.fallbackModels || [],
         });
 
-        // Core tools for allowed tools selection
-        const coreTools = [
-          { id: "filesystem", name: "File System" },
-          { id: "terminal", name: "Terminal" },
-          { id: "browser", name: "Browser" },
-          { id: "network", name: "Network" }
-        ];
-
         return (
           <div className="step-view">
             <h2>Configure Agent {currentAgentConfigIdx + 1} of {agentConfigs.length}</h2>
@@ -3578,7 +3571,7 @@ Managed by Clawnetes.`,
             <div className="form-group" style={{ marginTop: "1rem" }}>
               <label>Allowed Tools</label>
               <div className="skills-grid" style={{ marginTop: "0.5rem" }}>
-                {[...coreTools, ...availableSkills.map(s => ({ id: s.id, name: s.name }))].map(tool => (
+                {CORE_TOOL_OPTIONS.map(tool => (
                   <div
                     key={`tool-${tool.id}`}
                     className={`skill-card ${currentAgent.allowedTools.includes(tool.id) ? "active" : ""}`}
