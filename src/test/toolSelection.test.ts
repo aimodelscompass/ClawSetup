@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { AVAILABLE_SKILLS } from "../presets/availableSkills";
 import {
+  createInheritedToolPolicy,
+  getEffectiveEnabledToolIds,
+  getEffectiveToolPolicy,
   TOOL_DEFINITIONS,
   deriveToolPolicyFromLegacy,
   getSkillIdSet,
@@ -57,17 +60,19 @@ describe("toolSelection", () => {
       allow: [],
       deny: [],
       elevatedEnabled: false,
+      inherit: false,
     });
   });
 
   it("normalizes alias ids inside tool policies", () => {
     expect(
-      normalizeToolPolicy({ profile: "minimal", allow: ["sessions_status"], deny: [] }, knownSkillIds),
+      normalizeToolPolicy({ profile: "minimal", allow: ["sessions_status", "bash", "apply-patch"], deny: [] }, knownSkillIds),
     ).toEqual({
       profile: "minimal",
-      allow: ["session_status"],
+      allow: ["session_status", "exec", "apply_patch"],
       deny: [],
       elevatedEnabled: false,
+      inherit: false,
     });
   });
 
@@ -84,6 +89,53 @@ describe("toolSelection", () => {
       allow: [],
       deny: [],
       elevatedEnabled: true,
+      inherit: false,
+    });
+  });
+
+  it("matches the current OpenClaw coding tool profile", () => {
+    const codingTools = getEffectiveEnabledToolIds({ profile: "coding", allow: [], deny: [] });
+
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toContain("sessions_yield");
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toContain("subagents");
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).not.toContain("bash");
+    expect(codingTools.has("sessions_yield")).toBe(true);
+    expect(codingTools.has("subagents")).toBe(true);
+    expect(codingTools.has("cron")).toBe(true);
+    expect(codingTools.has("browser")).toBe(false);
+  });
+
+  it("treats omitted top-level policies as OpenClaw full access", () => {
+    expect(deriveToolPolicyFromLegacy("all", [], [], knownSkillIds)).toEqual({
+      profile: "full",
+      allow: [],
+      deny: [],
+      elevatedEnabled: false,
+      inherit: false,
+    });
+  });
+
+  it("resolves inherited agent policies from the parent baseline", () => {
+    expect(getEffectiveToolPolicy(
+      createInheritedToolPolicy(),
+      { profile: "full", allow: [], deny: [], elevatedEnabled: false },
+    )).toEqual({
+      profile: "full",
+      allow: [],
+      deny: [],
+      elevatedEnabled: false,
+      inherit: false,
+    });
+
+    expect(getEffectiveToolPolicy(
+      createInheritedToolPolicy(),
+      { profile: "coding", allow: ["browser"], deny: [], elevatedEnabled: true },
+    )).toEqual({
+      profile: "coding",
+      allow: ["browser"],
+      deny: [],
+      elevatedEnabled: true,
+      inherit: false,
     });
   });
 });

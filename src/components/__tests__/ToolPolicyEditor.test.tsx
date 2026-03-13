@@ -22,6 +22,7 @@ describe("ToolPolicyEditor", () => {
       allow: [],
       deny: [],
       elevatedEnabled: false,
+      inherit: false,
     });
   });
 
@@ -86,6 +87,31 @@ describe("ToolPolicyEditor", () => {
       allow: [],
       deny: [],
       elevatedEnabled: true,
+      inherit: false,
+    });
+  });
+
+  it("supports inherited agent tool policies", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(
+      <ToolPolicyEditor
+        policy={{ profile: null, allow: [], deny: [], elevatedEnabled: false, inherit: true }}
+        inheritedPolicy={{ profile: "full", allow: [], deny: [], elevatedEnabled: false }}
+        onChange={onChange}
+        allowInherit
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /inherit/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /coding/i }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      profile: "coding",
+      allow: [],
+      deny: [],
+      elevatedEnabled: false,
+      inherit: false,
     });
   });
 });

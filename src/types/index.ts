@@ -46,6 +46,7 @@ export interface ToolPolicy {
   allow: string[];
   deny: string[];
   elevatedEnabled?: boolean;
+  inherit?: boolean;
 }
 
 export interface ToolDefinition {

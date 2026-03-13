@@ -11,7 +11,7 @@ import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
 import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProvider, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import ToolPolicyEditor from "./components/ToolPolicyEditor";
-import { DEFAULT_TOOL_POLICY, deriveToolPolicyFromLegacy, getSkillIdSet, normalizeSkillAndToolSelection, normalizeToolPolicy } from "./utils/toolSelection";
+import { createInheritedToolPolicy, DEFAULT_TOOL_POLICY, deriveToolPolicyFromLegacy, getSkillIdSet, materializeToolPolicy, normalizeSkillAndToolSelection, normalizeToolPolicy } from "./utils/toolSelection";
 import Dropdown from "./components/Dropdown";
 import type { AgentTypeId, AgentConfigData, BusinessFunctionId, CronJobConfig, ProviderAuthConfig, ToolPolicy } from "./types";
 
@@ -757,11 +757,12 @@ function App() {
   // emitted with their useState defaults by constructConfigPayload().
   function normalizeForComparison(payload: any) {
     if (!payload) return payload;
-    const normalizedPolicy = normalizeToolPolicy({
-      profile: payload.tools_profile ?? null,
-      allow: payload.allowed_tools ?? [],
-      deny: payload.denied_tools ?? [],
-    }, availableSkillIds);
+    const normalizedPolicy = (payload.tools_profile != null
+      || (payload.allowed_tools?.length ?? 0) > 0
+      || (payload.denied_tools?.length ?? 0) > 0
+      || payload.tools_mode != null)
+      ? getLoadedTopLevelToolPolicy(payload)
+      : normalizeToolPolicy(DEFAULT_TOOL_POLICY, availableSkillIds);
     return {
       ...payload,
       sandbox_mode: payload.sandbox_mode ?? "off",
@@ -773,6 +774,62 @@ function App() {
       idle_timeout_ms: (payload.heartbeat_mode ?? "1h") === "idle"
         ? payload.idle_timeout_ms
         : null,
+    };
+  }
+
+  function hasExplicitAgentToolPolicy(agent: any) {
+    return Boolean(
+      agent?.tools
+      || agent?.tools_profile != null
+      || (agent?.allowed_tools?.length ?? 0) > 0
+      || (agent?.denied_tools?.length ?? 0) > 0,
+    );
+  }
+
+  function getLoadedTopLevelToolPolicy(config: any) {
+    return normalizeToolPolicy(
+      config.tools_profile
+        ? {
+            profile: config.tools_profile,
+            allow: config.allowed_tools,
+            deny: config.denied_tools,
+          }
+        : deriveToolPolicyFromLegacy(
+            config.tools_mode,
+            config.allowed_tools,
+            config.denied_tools,
+            availableSkillIds,
+          ),
+      availableSkillIds,
+    );
+  }
+
+  function getLoadedAgentToolPolicy(agent: any) {
+    if (!hasExplicitAgentToolPolicy(agent)) {
+      return createInheritedToolPolicy();
+    }
+
+    return normalizeToolPolicy({
+      profile: agent.tools_profile ?? agent.tools?.profile ?? null,
+      allow: agent.allowed_tools ?? agent.tools?.allow ?? [],
+      deny: agent.denied_tools ?? agent.tools?.deny ?? [],
+      elevatedEnabled: agent.tools?.elevated?.enabled ?? false,
+      inherit: false,
+    }, availableSkillIds);
+  }
+
+  function buildAgentToolsPayload(policy: ToolPolicy, inheritedPolicy: ToolPolicy = toolPolicy) {
+    const normalizedPolicy = normalizeToolPolicy(policy, availableSkillIds);
+    if (normalizedPolicy.inherit) {
+      return null;
+    }
+
+    const materializedPolicy = materializeToolPolicy(normalizedPolicy, inheritedPolicy);
+    return {
+      profile: materializedPolicy.profile,
+      allow: materializedPolicy.allow,
+      deny: materializedPolicy.deny,
+      elevated: { enabled: materializedPolicy.elevatedEnabled ?? false },
     };
   }
 
@@ -792,11 +849,7 @@ function App() {
       initial.allowed_tools || [],
       availableSkillIds,
     );
-    const normalizedTopLevelToolPolicy = normalizeToolPolicy({
-      profile: initial.tools_profile ?? null,
-      allow: initial.allowed_tools || [],
-      deny: initial.denied_tools || [],
-    }, availableSkillIds);
+    const normalizedTopLevelToolPolicy = getLoadedTopLevelToolPolicy(initial);
     const defaultIdentity = `# IDENTITY.md - Who Am I?
 - **Name:** ${initial.agent_name}
 - **Emoji:** ${initial.agent_emoji || "🦞"}
@@ -838,15 +891,11 @@ Managed by Clawnetes.`;
       agents: initial.enable_multi_agent && initial.agent_configs ? initial.agent_configs.map((a: any) => {
         const normalizedAgentSelection = normalizeSkillAndToolSelection(
           a.skills || [],
-          a.allowed_tools || [],
+          a.tools?.allow || a.allowed_tools || [],
           availableSkillIds,
         );
-        const normalizedAgentToolPolicy = normalizeToolPolicy({
-          profile: a.tools_profile ?? a.tools?.profile ?? null,
-          allow: a.allowed_tools || a.tools?.allow || [],
-          deny: a.denied_tools || a.tools?.deny || [],
-          elevatedEnabled: a.tools?.elevated?.enabled ?? false,
-        }, availableSkillIds);
+        const normalizedAgentToolPolicy = getLoadedAgentToolPolicy(a);
+        const agentToolsPayload = buildAgentToolsPayload(normalizedAgentToolPolicy, normalizedTopLevelToolPolicy);
 
         return {
           id: a.id,
@@ -866,12 +915,7 @@ Managed by Clawnetes.`,
           soul_md: a.soul_md || null,
           tools_md: a.tools_md || null,
           agents_md: a.agents_md || null,
-          tools: {
-            profile: normalizedAgentToolPolicy.profile,
-            allow: normalizedAgentToolPolicy.allow,
-            deny: normalizedAgentToolPolicy.deny,
-            elevated: { enabled: normalizedAgentToolPolicy.elevatedEnabled ?? false },
-          },
+          tools: agentToolsPayload,
         };
       }) : null,
       preserve_state: isPaired,
@@ -922,7 +966,9 @@ Managed by Clawnetes.`;
       service_keys: serviceKeys,
       provider_auths: effectiveProviderAuths,
       sandbox_mode: usePresetFields ? mappedSandboxMode : null,
-      tools_mode: null,
+      tools_mode: usePresetFields
+        ? (normalizedTopLevelToolPolicy.profile === "full" && normalizedTopLevelToolPolicy.allow.length === 0 && normalizedTopLevelToolPolicy.deny.length === 0 ? "all" : "allowlist")
+        : "all",
       tools_profile: usePresetFields ? normalizedTopLevelToolPolicy.profile : null,
       allowed_tools: usePresetFields ? normalizedTopLevelToolPolicy.allow : null,
       denied_tools: usePresetFields ? normalizedTopLevelToolPolicy.deny : null,
@@ -941,6 +987,7 @@ Managed by Clawnetes.`;
           availableSkillIds,
         );
         const normalizedAgentToolPolicy = normalizeToolPolicy(a.toolPolicy, availableSkillIds);
+        const agentToolsPayload = buildAgentToolsPayload(normalizedAgentToolPolicy, normalizedTopLevelToolPolicy);
 
         return {
           id: a.id,
@@ -960,12 +1007,7 @@ Managed by Clawnetes.`,
           soul_md: a.soulMd || null,
           tools_md: a.toolsMd || null,
           agents_md: a.agentsMd || null,
-          tools: {
-            profile: normalizedAgentToolPolicy.profile,
-            allow: normalizedAgentToolPolicy.allow,
-            deny: normalizedAgentToolPolicy.deny,
-            elevated: { enabled: normalizedAgentToolPolicy.elevatedEnabled ?? false },
-          },
+          tools: agentToolsPayload,
         };
       }) : null,
       preserve_state: isPaired,
@@ -1290,21 +1332,7 @@ Managed by Clawnetes.`,
         config.allowed_tools,
         availableSkillIds,
       );
-      const normalizedTopLevelToolPolicy = normalizeToolPolicy(
-        config.tools_profile
-          ? {
-              profile: config.tools_profile,
-              allow: config.allowed_tools,
-              deny: config.denied_tools,
-            }
-          : deriveToolPolicyFromLegacy(
-              config.tools_mode,
-              config.allowed_tools,
-              config.denied_tools,
-              availableSkillIds,
-            ),
-        availableSkillIds,
-      );
+      const normalizedTopLevelToolPolicy = getLoadedTopLevelToolPolicy(config);
       setSelectedSkills(normalizedTopLevelSelection.skills);
       // Service keys might be partial, merge them?
       setServiceKeys(config.service_keys);
@@ -1355,25 +1383,10 @@ Managed by Clawnetes.`,
         setAgentConfigs(config.agent_configs.map((a: any) => {
           const normalizedAgentSelection = normalizeSkillAndToolSelection(
             a.skills,
-            a.allowed_tools,
+            a.tools?.allow || a.allowed_tools,
             availableSkillIds,
           );
-          const normalizedAgentToolPolicy = normalizeToolPolicy(
-            a.tools_profile || a.tools?.profile
-              ? {
-                  profile: a.tools_profile || a.tools?.profile,
-                  allow: a.allowed_tools || a.tools?.allow,
-                  deny: a.denied_tools || a.tools?.deny,
-                  elevatedEnabled: a.tools?.elevated?.enabled,
-                }
-              : deriveToolPolicyFromLegacy(
-                  "allowlist",
-                  a.allowed_tools,
-                  a.denied_tools,
-                  availableSkillIds,
-                ),
-            availableSkillIds,
-          );
+          const normalizedAgentToolPolicy = getLoadedAgentToolPolicy(a);
 
           return {
             id: a.id,
@@ -3200,7 +3213,7 @@ Managed by Clawnetes.`,
                         soulMd: "",
                         toolsMd: "",
                         agentsMd: "",
-                        toolPolicy: DEFAULT_TOOL_POLICY,
+                        toolPolicy: createInheritedToolPolicy(),
                         cronJobs: [],
                       });
                     }
@@ -3583,6 +3596,7 @@ Managed by Clawnetes.`,
             <div className="form-group" style={{ marginTop: "1rem" }}>
               <ToolPolicyEditor
                 policy={currentAgent.toolPolicy}
+                inheritedPolicy={toolPolicy}
                 onChange={(nextPolicy) => {
                   const updated = [...agentConfigs];
                   updated[currentAgentConfigIdx].toolPolicy = nextPolicy;
@@ -3591,6 +3605,7 @@ Managed by Clawnetes.`,
                 title="Tool Access"
                 description="Per-agent overrides follow the same OpenClaw tool profile model."
                 showElevatedToggle
+                allowInherit
               />
             </div>
 
@@ -3662,7 +3677,7 @@ Managed by Clawnetes.`,
                   soulMd: "",
                   toolsMd: "",
                   agentsMd: "",
-                  toolPolicy: DEFAULT_TOOL_POLICY,
+                  toolPolicy: createInheritedToolPolicy(),
                   cronJobs: [],
                 };
                 setAgentConfigs([...agentConfigs, newAgent]);

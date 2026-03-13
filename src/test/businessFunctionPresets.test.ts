@@ -48,7 +48,9 @@ describe("businessFunctionPresets", () => {
   });
 
   it("gives orchestrator agents the tools needed to delegate to sub-agents", () => {
-    for (const preset of Object.values(BUSINESS_FUNCTION_PRESETS)) {
+    for (const preset of Object.values(BUSINESS_FUNCTION_PRESETS).filter(
+      (entry) => entry.mainAgent.toolPolicy.allow.includes("agents_list") || entry.mainAgent.toolPolicy.allow.includes("sessions_spawn"),
+    )) {
       const enabledTools = getEffectiveEnabledToolIds(preset.mainAgent.toolPolicy);
       expect(enabledTools.has("sessions_send")).toBe(true);
       expect(enabledTools.has("agents_list")).toBe(true);

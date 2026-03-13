@@ -1,10 +1,13 @@
 import { useState } from "react";
 import {
+  createInheritedToolPolicy,
   DEFAULT_TOOL_POLICY,
   TOOL_PROFILE_IDS,
+  getEffectiveToolPolicy,
   getEffectiveEnabledToolIds,
   getSectionedToolDefinitions,
   getUnknownToolIds,
+  materializeToolPolicy,
   setToolProfile,
   toggleToolInPolicy,
 } from "../utils/toolSelection";
@@ -16,6 +19,8 @@ interface ToolPolicyEditorProps {
   title?: string;
   description?: string;
   showElevatedToggle?: boolean;
+  allowInherit?: boolean;
+  inheritedPolicy?: ToolPolicy;
 }
 
 const PROFILE_LABELS: Record<string, { name: string; description: string }> = {
@@ -31,17 +36,23 @@ export default function ToolPolicyEditor({
   title = "Tool Access",
   description = "Choose a base profile, then enable or disable individual tools.",
   showElevatedToggle = false,
+  allowInherit = false,
+  inheritedPolicy = DEFAULT_TOOL_POLICY,
 }: ToolPolicyEditorProps) {
-  const effectivePolicy = {
+  const normalizedPolicy = {
     ...DEFAULT_TOOL_POLICY,
     ...policy,
     allow: policy.allow ?? [],
     deny: policy.deny ?? [],
+    inherit: policy.inherit ?? false,
   };
+  const effectivePolicy = getEffectiveToolPolicy(normalizedPolicy, inheritedPolicy);
   const enabledTools = getEffectiveEnabledToolIds(effectivePolicy);
   const sections = getSectionedToolDefinitions();
   const unknownTools = getUnknownToolIds(effectivePolicy);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  const materializedPolicy = materializeToolPolicy(normalizedPolicy, inheritedPolicy);
 
   const toggleSection = (section: string) => {
     setExpandedSections((current) => ({
@@ -61,14 +72,14 @@ export default function ToolPolicyEditor({
           <button
             type="button"
             className="secondary"
-            onClick={() => onChange({ ...effectivePolicy, profile: "full", allow: [], deny: [] })}
+            onClick={() => onChange({ ...materializedPolicy, profile: "full", allow: [], deny: [], inherit: false })}
           >
             Enable All
           </button>
           <button
             type="button"
             className="secondary"
-            onClick={() => onChange({ ...effectivePolicy, profile: null, allow: [], deny: getSectionedToolDefinitions().flatMap(({ tools }) => tools.map((tool) => tool.id)) })}
+            onClick={() => onChange({ ...materializedPolicy, profile: null, allow: [], deny: getSectionedToolDefinitions().flatMap(({ tools }) => tools.map((tool) => tool.id)), inherit: false })}
           >
             Disable All
           </button>
@@ -76,15 +87,25 @@ export default function ToolPolicyEditor({
       </div>
 
       <div className="tool-profile-grid">
+        {allowInherit && (
+          <button
+            type="button"
+            className={`tool-profile-card ${normalizedPolicy.inherit ? "active" : ""}`}
+            onClick={() => onChange({ ...createInheritedToolPolicy(), elevatedEnabled: normalizedPolicy.elevatedEnabled ?? false })}
+          >
+            <span className="tool-profile-name">Inherit</span>
+            <span className="tool-profile-description">Use the parent or OpenClaw default tool policy.</span>
+          </button>
+        )}
         {TOOL_PROFILE_IDS.map((profileId) => {
           const meta = PROFILE_LABELS[profileId];
-          const isActive = effectivePolicy.profile === profileId;
+          const isActive = !normalizedPolicy.inherit && effectivePolicy.profile === profileId;
           return (
             <button
               type="button"
               key={profileId}
               className={`tool-profile-card ${isActive ? "active" : ""}`}
-              onClick={() => onChange(setToolProfile(effectivePolicy, profileId))}
+              onClick={() => onChange({ ...setToolProfile(materializedPolicy, profileId), inherit: false })}
             >
               <span className="tool-profile-name">{meta.name}</span>
               <span className="tool-profile-description">{meta.description}</span>
@@ -102,7 +123,11 @@ export default function ToolPolicyEditor({
           <button
             type="button"
             className={`tool-toggle ${effectivePolicy.elevatedEnabled ? "enabled" : ""}`}
-            onClick={() => onChange({ ...effectivePolicy, elevatedEnabled: !effectivePolicy.elevatedEnabled })}
+            onClick={() => onChange({
+              ...(normalizedPolicy.inherit ? createInheritedToolPolicy() : materializedPolicy),
+              elevatedEnabled: !effectivePolicy.elevatedEnabled,
+              inherit: normalizedPolicy.inherit,
+            })}
             aria-pressed={effectivePolicy.elevatedEnabled}
             aria-label="Toggle elevated runtime"
           >
@@ -145,7 +170,10 @@ export default function ToolPolicyEditor({
                       <button
                         type="button"
                         className={`tool-toggle ${enabled ? "enabled" : ""}`}
-                        onClick={() => onChange(toggleToolInPolicy(effectivePolicy, tool.id, !enabled))}
+                        onClick={() => onChange({
+                          ...toggleToolInPolicy(materializedPolicy, tool.id, !enabled),
+                          inherit: false,
+                        })}
                         aria-pressed={enabled}
                         aria-label={`Toggle ${tool.name}`}
                       >

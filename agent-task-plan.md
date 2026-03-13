@@ -1,14 +1,15 @@
-# Connect Brain Duplicate Auth Fix Plan
+# Tool Policy Parity Plan
 
 ## Objective
-- Remove the duplicate provider authentication block from the Connect Brain wizard step.
-- Keep the existing layout and behavior intact apart from showing auth only once under the provider selector.
-- Add regression coverage for hosted providers so this duplicate render does not return.
+- Align Clawnetes tool policies with the actual OpenClaw tool model and effective defaults.
+- Preserve inherited/default agent tool state when loading and saving existing OpenClaw configs.
+- Ensure Clawnetes and the OpenClaw Web UI show the same enabled tools for the same agent.
 
 ## Implementation Outline
-- Update `src/App.tsx` step `8` to keep only the top `renderProviderAuthEditor(...)` call.
-- Preserve existing model selection, thinking level, and hosted/local helper text.
-- Add a wizard navigation test that reaches Connect Brain and verifies a single auth editor for Anthropic and OpenAI.
+- Update the frontend tool catalog and profile definitions to match the current OpenClaw tool list.
+- Add explicit inherited/default handling for per-agent tool policies in Clawnetes.
+- Fix App load/save/comparison logic so omitted tool config resolves correctly and round-trips without false rewrites.
+- Add regression tests for tool profile resolution and inherited agent tool state.
 - Run `npm test`.
 - Run `npm run tauri dev`.
 - Commit and push after validation succeeds.

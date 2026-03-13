@@ -14,15 +14,16 @@ export const TOOL_GROUP_LABELS: Record<string, string> = {
 };
 
 export const TOOL_GROUPS: Record<string, string[]> = {
-  "group:runtime": ["exec", "bash", "process"],
+  "group:runtime": ["exec", "process"],
   "group:fs": ["read", "write", "edit", "apply_patch"],
   "group:sessions": [
     "sessions_list",
     "sessions_history",
     "sessions_send",
     "sessions_spawn",
+    "sessions_yield",
+    "subagents",
     "session_status",
-    "agents_list",
   ],
   "group:memory": ["memory_search", "memory_get"],
   "group:web": ["web_search", "web_fetch"],
@@ -36,7 +37,6 @@ export const TOOL_GROUPS: Record<string, string[]> = {
     "edit",
     "apply_patch",
     "exec",
-    "bash",
     "process",
     "web_search",
     "web_fetch",
@@ -46,8 +46,9 @@ export const TOOL_GROUPS: Record<string, string[]> = {
     "sessions_history",
     "sessions_send",
     "sessions_spawn",
+    "sessions_yield",
+    "subagents",
     "session_status",
-    "agents_list",
     "browser",
     "canvas",
     "message",
@@ -68,6 +69,9 @@ export const TOOL_PROFILES = {
     ...TOOL_GROUPS["group:runtime"],
     ...TOOL_GROUPS["group:sessions"],
     ...TOOL_GROUPS["group:memory"],
+    "web_search",
+    "web_fetch",
+    "cron",
     "image",
   ],
   messaging: [
@@ -84,26 +88,27 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { id: "read", name: "read", description: "Read file contents", section: "Files" },
   { id: "write", name: "write", description: "Create or overwrite files", section: "Files" },
   { id: "edit", name: "edit", description: "Make precise edits", section: "Files" },
-  { id: "apply_patch", name: "apply_patch", description: "Patch files safely", section: "Files" },
+  { id: "apply_patch", name: "apply_patch", description: "Patch files (OpenAI)", section: "Files" },
   { id: "exec", name: "exec", description: "Run shell commands", section: "Runtime" },
-  { id: "bash", name: "bash", description: "Run bash snippets", section: "Runtime" },
   { id: "process", name: "process", description: "Manage background processes", section: "Runtime" },
   { id: "web_search", name: "web_search", description: "Search the web", section: "Web" },
-  { id: "web_fetch", name: "web_fetch", description: "Fetch web pages", section: "Web" },
-  { id: "memory_search", name: "memory_search", description: "Semantic memory search", section: "Memory" },
-  { id: "memory_get", name: "memory_get", description: "Read memory records", section: "Memory" },
-  { id: "sessions_list", name: "sessions_list", description: "List agent sessions", section: "Sessions" },
-  { id: "sessions_history", name: "sessions_history", description: "Inspect session history", section: "Sessions" },
+  { id: "web_fetch", name: "web_fetch", description: "Fetch web content", section: "Web" },
+  { id: "memory_search", name: "memory_search", description: "Semantic search", section: "Memory" },
+  { id: "memory_get", name: "memory_get", description: "Read memory files", section: "Memory" },
+  { id: "sessions_list", name: "sessions_list", description: "List sessions", section: "Sessions" },
+  { id: "sessions_history", name: "sessions_history", description: "Session history", section: "Sessions" },
   { id: "sessions_send", name: "sessions_send", description: "Send to a session", section: "Sessions" },
-  { id: "sessions_spawn", name: "sessions_spawn", description: "Spawn sub-agent sessions", section: "Sessions" },
-  { id: "session_status", name: "session_status", description: "Inspect the current session", section: "Sessions" },
-  { id: "browser", name: "browser", description: "Control the browser", section: "UI" },
+  { id: "sessions_spawn", name: "sessions_spawn", description: "Spawn sub-agent", section: "Sessions" },
+  { id: "sessions_yield", name: "sessions_yield", description: "End turn to receive sub-agent results", section: "Sessions" },
+  { id: "subagents", name: "subagents", description: "Manage sub-agents", section: "Sessions" },
+  { id: "session_status", name: "session_status", description: "Session status", section: "Sessions" },
+  { id: "browser", name: "browser", description: "Control web browser", section: "UI" },
   { id: "canvas", name: "canvas", description: "Control canvases", section: "UI" },
   { id: "message", name: "message", description: "Send messages", section: "Messaging" },
-  { id: "cron", name: "cron", description: "Manage cron jobs", section: "Automation" },
-  { id: "gateway", name: "gateway", description: "Control the gateway", section: "Automation" },
-  { id: "nodes", name: "nodes", description: "Access nodes", section: "Nodes" },
-  { id: "agents_list", name: "agents_list", description: "List targetable agents", section: "Agents" },
+  { id: "cron", name: "cron", description: "Schedule tasks", section: "Automation" },
+  { id: "gateway", name: "gateway", description: "Gateway control", section: "Automation" },
+  { id: "nodes", name: "nodes", description: "Nodes + devices", section: "Nodes" },
+  { id: "agents_list", name: "agents_list", description: "List agents", section: "Agents" },
   { id: "image", name: "image", description: "Image understanding", section: "Media" },
   { id: "tts", name: "tts", description: "Text-to-speech conversion", section: "Media" },
 ];
@@ -116,13 +121,23 @@ const LEGACY_TOOL_MAP: Record<string, string[]> = {
 };
 
 const TOOL_ID_ALIASES: Record<string, string> = {
+  bash: "exec",
+  "apply-patch": "apply_patch",
   sessions_status: "session_status",
 };
 
 export const DEFAULT_TOOL_POLICY: ToolPolicy = {
-  profile: "coding",
+  profile: "full",
   allow: [],
   deny: [],
+  inherit: false,
+};
+
+export const INHERITED_TOOL_POLICY: ToolPolicy = {
+  profile: null,
+  allow: [],
+  deny: [],
+  inherit: true,
 };
 
 function dedupe(values: string[]) {
@@ -211,6 +226,7 @@ export function normalizeToolPolicy(
   policy: Partial<ToolPolicy> | null | undefined,
   knownSkillIds?: Set<string>,
 ) {
+  const inherit = policy?.inherit ?? false;
   const profile = policy?.profile ?? null;
   const allow = normalizeToolEntries(policy?.allow).filter((id) => !knownSkillIds?.has(id));
   const deny = normalizeToolEntries(policy?.deny).filter((id) => !knownSkillIds?.has(id));
@@ -219,8 +235,45 @@ export function normalizeToolPolicy(
     profile,
     allow: dedupe(allow),
     deny: dedupe(deny),
-    elevatedEnabled: policy?.elevatedEnabled ?? false,
+    elevatedEnabled: inherit ? policy?.elevatedEnabled : policy?.elevatedEnabled ?? false,
+    inherit,
   } satisfies ToolPolicy;
+}
+
+export function getEffectiveToolPolicy(
+  policy: ToolPolicy | null | undefined,
+  inheritedPolicy: ToolPolicy = DEFAULT_TOOL_POLICY,
+) {
+  const normalizedPolicy = normalizeToolPolicy(policy);
+  const normalizedInheritedPolicy = normalizeToolPolicy({
+    ...DEFAULT_TOOL_POLICY,
+    ...inheritedPolicy,
+    inherit: false,
+  });
+
+  if (!normalizedPolicy.inherit) {
+    return normalizedPolicy;
+  }
+
+  return normalizeToolPolicy({
+    ...normalizedInheritedPolicy,
+    elevatedEnabled: normalizedPolicy.elevatedEnabled ?? normalizedInheritedPolicy.elevatedEnabled ?? false,
+    inherit: false,
+  });
+}
+
+export function materializeToolPolicy(
+  policy: ToolPolicy | null | undefined,
+  inheritedPolicy: ToolPolicy = DEFAULT_TOOL_POLICY,
+) {
+  return normalizeToolPolicy({
+    ...getEffectiveToolPolicy(policy, inheritedPolicy),
+    inherit: false,
+  });
+}
+
+export function createInheritedToolPolicy() {
+  return normalizeToolPolicy(INHERITED_TOOL_POLICY);
 }
 
 export function deriveToolPolicyFromLegacy(
