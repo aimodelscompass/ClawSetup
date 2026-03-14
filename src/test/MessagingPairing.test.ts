@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getTelegramPairingDisplayCode,
   getMessagingChannelFromConfig,
   hasMessagingSettingsChanged,
   isMessagingLinked,
@@ -71,9 +72,16 @@ describe("messagingPairing utilities", () => {
 
   it("shows only the pairing UI for the selected channel", () => {
     expect(shouldShowTelegramPairing("telegram", false)).toBe(true);
+    expect(shouldShowTelegramPairing("telegram", true)).toBe(false);
     expect(shouldShowTelegramPairing("whatsapp", false)).toBe(false);
     expect(shouldShowWhatsAppPairing("whatsapp", false)).toBe(true);
     expect(shouldShowWhatsAppPairing("telegram", false)).toBe(false);
+  });
+
+  it("does not infer Telegram readiness from instruction text", () => {
+    expect(getTelegramPairingDisplayCode("Ready! Send any message to your Telegram bot.")).toBe(
+      "Ready! Send any message to your Telegram bot.",
+    );
   });
 
   it("derives the active messaging channel from loaded config", () => {

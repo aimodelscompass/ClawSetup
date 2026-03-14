@@ -22,6 +22,10 @@ export function shouldShowTelegramPairing(channel: MessagingChannel, telegramPai
   return channel === "telegram" && !telegramPaired;
 }
 
+export function getTelegramPairingDisplayCode(pairingCode: string): string {
+  return pairingCode;
+}
+
 export function shouldShowWhatsAppPairing(channel: MessagingChannel, whatsappPaired: boolean): boolean {
   return channel === "whatsapp" && !whatsappPaired;
 }

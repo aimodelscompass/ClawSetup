@@ -11,7 +11,7 @@ import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
 import { getAgentSessionInitIds } from "./utils/agentSessions";
 import { getAdvancedTransitionAction } from "./utils/licenseGate";
-import { getMessagingChannelFromConfig, hasMessagingSettingsChanged, isMessagingLinked, shouldShowTelegramPairing, shouldShowWhatsAppPairing } from "./utils/messagingPairing";
+import { getMessagingChannelFromConfig, getTelegramPairingDisplayCode, hasMessagingSettingsChanged, isMessagingLinked, shouldShowTelegramPairing, shouldShowWhatsAppPairing } from "./utils/messagingPairing";
 import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProvider, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import ToolPolicyEditor from "./components/ToolPolicyEditor";
 import { createInheritedToolPolicy, DEFAULT_TOOL_POLICY, deriveToolPolicyFromLegacy, getSkillIdSet, materializeToolPolicy, normalizeSkillAndToolSelection, normalizeToolPolicy } from "./utils/toolSelection";
@@ -4346,7 +4346,7 @@ Managed by Clawnetes.`,
                   <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem" }}>
                     Send any message to your bot to receive your code.
                   </p>
-                  <div className="pairing-code-display">{pairingCode.includes("Ready") ? "READY" : pairingCode}</div>
+                  <div className="pairing-code-display">{getTelegramPairingDisplayCode(pairingCode)}</div>
 
                   {telegramToken && (
                     <div className="form-group" style={{ marginTop: "2rem" }}>

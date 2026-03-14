@@ -4388,30 +4388,95 @@ fn shell_command(cmd: &str) -> Result<String, String> {
 
 #[command]
 fn check_pairing_status(remote: Option<RemoteInfo>) -> Result<bool, String> {
-    // Check dmPolicy via CLI to get actual active state
-    let cmd_raw = "openclaw config get channels.telegram.accounts.default.dmPolicy";
-    let output = if let Some(r) = remote {
+    if let Some(r) = remote {
         let sess = connect_ssh(&r)?;
         let os_type = execute_ssh(&sess, "uname -s")?.trim().to_string();
         let prefix = get_env_prefix(&os_type);
-        execute_ssh(&sess, &format!("{}{}", prefix, cmd_raw))
-    } else {
-        shell_command(cmd_raw)
-    };
 
-    match output {
-        Ok(policy) => Ok(telegram_pairing_status_from_dm_policy(&policy)),
-        Err(_) => {
-            // If command fails, fallback to assuming not paired or error
-            // But if it fails, maybe openclaw isn't running or config is bad.
-            // Let's return false to be safe (ask to pair).
-            Ok(false)
+        if let Some(policy) = read_telegram_dm_policy_via_cli(|cmd| execute_ssh(&sess, &format!("{}{}", prefix, cmd)))? {
+            return Ok(telegram_pairing_status_from_dm_policy(&policy));
         }
+
+        if let Some(policy) =
+            read_telegram_dm_policy_from_config_str(&execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?)
+        {
+            return Ok(telegram_pairing_status_from_dm_policy(&policy));
+        }
+
+        return Ok(false);
     }
+
+    if let Some(policy) = read_telegram_dm_policy_via_cli(shell_command)? {
+        return Ok(telegram_pairing_status_from_dm_policy(&policy));
+    }
+
+    let home_dir = dirs::home_dir().ok_or("Could not determine local home directory.")?;
+    let config_path = home_dir.join(".openclaw").join("openclaw.json");
+    let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    if let Some(policy) = read_telegram_dm_policy_from_config_str(&config_str) {
+        return Ok(telegram_pairing_status_from_dm_policy(&policy));
+    }
+
+    Ok(false)
 }
 
 fn telegram_pairing_status_from_dm_policy(policy: &str) -> bool {
     policy.trim().trim_matches('"') != "pairing"
+}
+
+fn parse_config_string_output(output: &str) -> Option<String> {
+    let value = output.trim().trim_matches('"');
+    if value.is_empty() || value == "null" || value == "undefined" {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn extract_telegram_dm_policy_from_config(config: &serde_json::Value) -> Option<String> {
+    config
+        .get("channels")
+        .and_then(|c| c.get("telegram"))
+        .and_then(|t| t.get("accounts"))
+        .and_then(|a| a.get("default"))
+        .and_then(|m| m.get("dmPolicy"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            config
+                .get("channels")
+                .and_then(|c| c.get("telegram"))
+                .and_then(|t| t.get("dmPolicy"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+}
+
+fn read_telegram_dm_policy_from_config_str(config_str: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(config_str)
+        .ok()
+        .and_then(|config| extract_telegram_dm_policy_from_config(&config))
+}
+
+fn read_telegram_dm_policy_via_cli<F>(mut run_command: F) -> Result<Option<String>, String>
+where
+    F: FnMut(&str) -> Result<String, String>,
+{
+    for cmd in [
+        "openclaw config get channels.telegram.accounts.default.dmPolicy",
+        "openclaw config get channels.telegram.dmPolicy",
+    ] {
+        match run_command(cmd) {
+            Ok(output) => {
+                if let Some(policy) = parse_config_string_output(&output) {
+                    return Ok(Some(policy));
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+
+    Ok(None)
 }
 
 fn whatsapp_session_is_linked(session_dir: &Path) -> bool {
@@ -4891,16 +4956,9 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     }
 
     // Check Pairing Status
-    let dm_policy = oc_config
-        .get("channels")
-        .and_then(|c| c.get("telegram"))
-        .and_then(|t| t.get("accounts"))
-        .and_then(|a| a.get("default"))
-        .and_then(|m| m.get("dmPolicy"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-
-    let is_paired = dm_policy != "pairing";
+    let is_paired = extract_telegram_dm_policy_from_config(&oc_config)
+        .map(|policy| telegram_pairing_status_from_dm_policy(&policy))
+        .unwrap_or(true);
 
     // Read additional workspace markdown files
     let tools_md_s = read_file_content(&format!("{}/.openclaw/workspace/TOOLS.md", home_dir));
@@ -6496,7 +6554,80 @@ mod tests {
     fn test_telegram_pairing_status_from_dm_policy() {
         assert!(telegram_pairing_status_from_dm_policy("\"allowlist\""));
         assert!(telegram_pairing_status_from_dm_policy("open"));
+        assert!(telegram_pairing_status_from_dm_policy("\"open\""));
         assert!(!telegram_pairing_status_from_dm_policy("pairing"));
+        assert!(!telegram_pairing_status_from_dm_policy("\"pairing\""));
+    }
+
+    #[test]
+    fn test_extract_telegram_dm_policy_from_config_supports_default_and_legacy_layouts() {
+        let account_scoped = serde_json::json!({
+            "channels": {
+                "telegram": {
+                    "accounts": {
+                        "default": {
+                            "dmPolicy": "open"
+                        }
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            extract_telegram_dm_policy_from_config(&account_scoped),
+            Some("open".to_string())
+        );
+
+        let legacy = serde_json::json!({
+            "channels": {
+                "telegram": {
+                    "dmPolicy": "pairing"
+                }
+            }
+        });
+        assert_eq!(
+            extract_telegram_dm_policy_from_config(&legacy),
+            Some("pairing".to_string())
+        );
+    }
+
+    #[test]
+    fn test_read_telegram_dm_policy_from_config_str_fallback_detects_linked_state() {
+        let config = r#"{
+            "channels": {
+                "telegram": {
+                    "dmPolicy": "open"
+                }
+            }
+        }"#;
+
+        let policy = read_telegram_dm_policy_from_config_str(config);
+        assert_eq!(policy, Some("open".to_string()));
+        assert!(telegram_pairing_status_from_dm_policy(policy.as_deref().unwrap()));
+    }
+
+    #[test]
+    fn test_read_telegram_dm_policy_via_cli_tries_legacy_after_primary_failure() {
+        let mut commands = Vec::new();
+        let policy = read_telegram_dm_policy_via_cli(|cmd| {
+            commands.push(cmd.to_string());
+            match cmd {
+                "openclaw config get channels.telegram.accounts.default.dmPolicy" => {
+                    Err("missing".to_string())
+                }
+                "openclaw config get channels.telegram.dmPolicy" => Ok("\"open\"".to_string()),
+                _ => Err("unexpected command".to_string()),
+            }
+        })
+        .expect("cli fallback succeeds");
+
+        assert_eq!(policy, Some("open".to_string()));
+        assert_eq!(
+            commands,
+            vec![
+                "openclaw config get channels.telegram.accounts.default.dmPolicy".to_string(),
+                "openclaw config get channels.telegram.dmPolicy".to_string(),
+            ]
+        );
     }
 
     #[test]
