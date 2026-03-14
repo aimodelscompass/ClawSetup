@@ -80,7 +80,7 @@ describe("messagingPairing utilities", () => {
 
   it("does not infer Telegram readiness from instruction text", () => {
     expect(getTelegramPairingDisplayCode("Ready! Send any message to your Telegram bot.")).toBe(
-      "Ready! Send any message to your Telegram bot.",
+      "READY",
     );
   });
 

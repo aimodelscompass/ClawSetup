@@ -4394,30 +4394,40 @@ fn check_pairing_status(remote: Option<RemoteInfo>) -> Result<bool, String> {
         let prefix = get_env_prefix(&os_type);
 
         if let Some(policy) = read_telegram_dm_policy_via_cli(|cmd| execute_ssh(&sess, &format!("{}{}", prefix, cmd)))? {
-            return Ok(telegram_pairing_status_from_dm_policy(&policy));
+            if telegram_pairing_status_from_dm_policy(&policy) {
+                return Ok(true);
+            }
         }
 
         if let Some(policy) =
             read_telegram_dm_policy_from_config_str(&execute_ssh(&sess, "cat ~/.openclaw/openclaw.json")?)
         {
-            return Ok(telegram_pairing_status_from_dm_policy(&policy));
+            if telegram_pairing_status_from_dm_policy(&policy) {
+                return Ok(true);
+            }
         }
 
-        return Ok(false);
+        return telegram_allow_from_is_linked_remote(&sess);
     }
 
     if let Some(policy) = read_telegram_dm_policy_via_cli(shell_command)? {
-        return Ok(telegram_pairing_status_from_dm_policy(&policy));
+        if telegram_pairing_status_from_dm_policy(&policy) {
+            return Ok(true);
+        }
     }
 
     let home_dir = dirs::home_dir().ok_or("Could not determine local home directory.")?;
     let config_path = home_dir.join(".openclaw").join("openclaw.json");
-    let config_str = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    if let Some(policy) = read_telegram_dm_policy_from_config_str(&config_str) {
-        return Ok(telegram_pairing_status_from_dm_policy(&policy));
+    if let Ok(config_str) = fs::read_to_string(&config_path) {
+        if let Some(policy) = read_telegram_dm_policy_from_config_str(&config_str) {
+            if telegram_pairing_status_from_dm_policy(&policy) {
+                return Ok(true);
+            }
+        }
     }
 
-    Ok(false)
+    let credentials_dir = home_dir.join(".openclaw").join("credentials");
+    Ok(telegram_allow_from_is_linked_local(&credentials_dir))
 }
 
 fn telegram_pairing_status_from_dm_policy(policy: &str) -> bool {
@@ -4477,6 +4487,54 @@ where
     }
 
     Ok(None)
+}
+
+fn telegram_allow_from_entries_from_str(content: &str) -> Option<usize> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|json| json.get("allowFrom").and_then(|value| value.as_array()).map(|items| items.len()))
+}
+
+fn is_telegram_allow_from_filename(name: &str) -> bool {
+    name.starts_with("telegram") && name.ends_with("-allowFrom.json")
+}
+
+fn telegram_allow_from_is_linked_local(credentials_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(credentials_dir) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            return false;
+        };
+        if !path.is_file() || !is_telegram_allow_from_filename(name) {
+            return false;
+        }
+
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| telegram_allow_from_entries_from_str(&content))
+            .map(|count| count > 0)
+            .unwrap_or(false)
+    })
+}
+
+fn telegram_allow_from_is_linked_remote(sess: &Session) -> Result<bool, String> {
+    let files = execute_ssh(
+        sess,
+        "find \"$HOME/.openclaw/credentials\" -maxdepth 1 -type f -name 'telegram*-allowFrom.json' 2>/dev/null",
+    )?;
+
+    for file in files.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let content = execute_ssh(sess, &format!("cat {}", shell_single_quote(file)))?;
+        if telegram_allow_from_entries_from_str(&content).unwrap_or(0) > 0 {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn whatsapp_session_is_linked(session_dir: &Path) -> bool {
@@ -4956,9 +5014,11 @@ async fn get_current_config(remote: Option<RemoteInfo>) -> Result<CurrentConfig,
     }
 
     // Check Pairing Status
+    let credentials_dir = PathBuf::from(&home_dir).join(".openclaw").join("credentials");
     let is_paired = extract_telegram_dm_policy_from_config(&oc_config)
         .map(|policy| telegram_pairing_status_from_dm_policy(&policy))
-        .unwrap_or(true);
+        .unwrap_or(false)
+        || telegram_allow_from_is_linked_local(&credentials_dir);
 
     // Read additional workspace markdown files
     let tools_md_s = read_file_content(&format!("{}/.openclaw/workspace/TOOLS.md", home_dir));
@@ -6628,6 +6688,37 @@ mod tests {
                 "openclaw config get channels.telegram.dmPolicy".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_telegram_allow_from_entries_from_str_detects_approved_senders() {
+        let content = r#"{
+            "version": 1,
+            "allowFrom": ["5162540072"]
+        }"#;
+        assert_eq!(telegram_allow_from_entries_from_str(content), Some(1));
+
+        let empty = r#"{
+            "version": 1,
+            "allowFrom": []
+        }"#;
+        assert_eq!(telegram_allow_from_entries_from_str(empty), Some(0));
+    }
+
+    #[test]
+    fn test_telegram_allow_from_is_linked_local_detects_account_file() {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("clawnetes-telegram-allowfrom-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("create temp telegram credentials dir");
+        fs::write(
+            temp_dir.join("telegram-default-allowFrom.json"),
+            r#"{"version":1,"allowFrom":["5162540072"]}"#,
+        )
+        .expect("write allowFrom file");
+
+        assert!(telegram_allow_from_is_linked_local(&temp_dir));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
