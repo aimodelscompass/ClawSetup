@@ -1,14 +1,13 @@
-# Restore Advanced License Gate With Cross-Environment Secure Persistence
+# Restore Channel-Aware Pairing Preservation on Reconfigure
 
 ## Summary
-- Restore the advanced-setup license gate removed in commit `57d431df`, using the same Gumroad verification flow and the same “Configuration Complete” entry point.
-- Change the old session-only unlock into persistent unlock across app launches.
-- Use a cross-environment secure storage design that works on macOS, Windows, WSL, and remote/headless Linux: save a verified license in an app-managed encrypted file, bound to the current machine.
+- Restore the earlier reconfigure behavior so unchanged Telegram and WhatsApp messaging setups do not trigger pairing again at the end of setup.
+- Make pairing/link state channel-aware instead of using Telegram state as the global gate for all messaging flows.
+- Cover both local and remote status checks and add regression tests for the channel-aware comparison logic and final pairing conditions.
 
 ## Implementation Changes
-- Update `src/App.tsx` to restore the license modal, probe saved license state on startup, and only bypass the modal when a saved verified license is present.
-- Update `src-tauri/src/main.rs` to add Gumroad verification, machine-bound encrypted license persistence, and Tauri commands for probing and saving license state.
-- Update `src-tauri/Cargo.toml` with crypto dependencies needed for authenticated encryption and machine-bound key derivation.
-- Add regression tests for the Rust license verification and storage helpers, and frontend tests for the restored gating flow.
+- Update `src/App.tsx` to compute preserve-state and final pairing prompts from the selected messaging channel plus channel-specific link status.
+- Add backend helpers in `src-tauri/src/main.rs` to query messaging link state per channel, including WhatsApp linked-session detection.
+- Add regression tests in Rust and TypeScript for channel-aware pairing preservation and messaging-setting comparisons.
 - Validate with `npm test` and `npm run tauri dev`.
 - Commit and push after validation succeeds.

@@ -1,10 +1,10 @@
 # Progress
 
-- [x] Inspect current app flow and git history for the removed advanced license gate.
-- [x] Update task tracking files for the license gate restoration task.
-- [x] Restore the advanced license modal and saved-license startup probe in the frontend.
-- [x] Add Gumroad verification and encrypted machine-bound license persistence in Tauri.
-- [x] Add or update regression tests for the restored license flow.
+- [x] Inspect the reconfigure regression and compare it with commit `0e8b64dd`.
+- [x] Update task tracking files for the messaging pairing regression fix.
+- [x] Add channel-aware messaging status helpers in Tauri and use them during reconfigure/install.
+- [x] Update frontend preserve-state and final pairing UI logic to be messaging-channel aware.
+- [x] Add or update regression tests for Telegram and WhatsApp reconfigure behavior.
 - [x] Run `npm test`.
 - [x] Run `npm run tauri dev`.
-- [x] Commit and push changes.
+- [ ] Commit and push changes.

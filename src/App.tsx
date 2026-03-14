@@ -11,6 +11,7 @@ import { BUSINESS_FUNCTION_PRESETS } from "./presets/businessFunctionPresets";
 import { updateIdentityField, updateSoulMission } from "./utils/markdownHelpers";
 import { getAgentSessionInitIds } from "./utils/agentSessions";
 import { getAdvancedTransitionAction } from "./utils/licenseGate";
+import { getMessagingChannelFromConfig, hasMessagingSettingsChanged, isMessagingLinked, shouldShowTelegramPairing, shouldShowWhatsAppPairing } from "./utils/messagingPairing";
 import { applyModelProviderAuth, buildDeferredOAuthQueue, buildReferencedProviders, createDefaultProviderAuth, getBaseProvider, getBaseProviderFromModel, getDefaultModelForProvider, getDisplayModelOptions, getProviderAuthOptions, isOAuthMethod, LOCAL_PROVIDERS, normalizeModelRefForUi, normalizeProviderAuths, OAUTH_METHODS_BY_PROVIDER } from "./utils/providerAuth";
 import ToolPolicyEditor from "./components/ToolPolicyEditor";
 import { createInheritedToolPolicy, DEFAULT_TOOL_POLICY, deriveToolPolicyFromLegacy, getSkillIdSet, materializeToolPolicy, normalizeSkillAndToolSelection, normalizeToolPolicy } from "./utils/toolSelection";
@@ -341,13 +342,21 @@ function App() {
             password: remotePassword || null,
             privateKeyPath: remotePrivateKeyPath || null
           } : null;
-          const status: boolean = await invoke("check_pairing_status", { remote: remoteConfig });
-          if (status) setIsPaired(true);
+          const status: boolean = await invoke("check_messaging_link_status", {
+            channel: messagingChannel,
+            remote: remoteConfig
+          });
+          if (messagingChannel === "telegram") {
+            setIsPaired(status);
+          } else if (messagingChannel === "whatsapp") {
+            setWhatsappPaired(status);
+            if (status) setWhatsappPhoneSubmitted(true);
+          }
         } catch (e) { console.error("Failed to check pairing status:", e); }
       };
-      checkPairing();
+      if (messagingChannel !== "none") checkPairing();
     }
-  }, [step]);
+  }, [step, messagingChannel, targetEnvironment, remoteIp, remoteUser, remotePassword, remotePrivateKeyPath]);
 
   useEffect(() => {
     if (step !== 17) return;
@@ -569,6 +578,11 @@ function App() {
                   ? "OAuth will open automatically at the end of setup."
                   : "OAuth will open automatically after OpenClaw is installed and setup reaches the final step."}
             </p>
+            {normalizedProvider === "google" && auth.auth_method === "google-gemini-cli" && !hasCredential && (
+              <p className="input-hint" style={{ marginTop: "0.25rem", color: "var(--warning, #b45309)" }}>
+                This is an unofficial Google Code Assist integration. Some users have reported Google account restrictions after using third-party Gemini CLI clients. If Google rejects it, use the Gemini API key option instead, or set `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID` before retrying.
+              </p>
+            )}
             {!hasCredential && providerQueueItem && !completionResult && (
               <p className="input-hint" style={{ marginTop: "0.25rem", color: "var(--text-muted)" }}>
                 Deferred until setup completion.
@@ -816,6 +830,7 @@ function App() {
     return {
       ...payload,
       sandbox_mode: payload.sandbox_mode ?? "off",
+      preserve_state: null,
       tools_mode: payload.tools_mode ?? null,
       tools_profile: normalizedPolicy.profile,
       allowed_tools: normalizedPolicy.allow,
@@ -985,6 +1000,24 @@ Managed by Clawnetes.`,
     };
   }
 
+  function getCurrentMessagingSettings() {
+    return {
+      channel: messagingChannel,
+      telegramToken,
+      whatsappDmPolicy,
+      whatsappPhoneNumber,
+    };
+  }
+
+  function getInitialMessagingSettings(initial: any) {
+    return {
+      channel: getMessagingChannelFromConfig(initial || {}),
+      telegramToken: initial?.telegram_token || "",
+      whatsappDmPolicy: initial?.whatsapp_dm_policy || null,
+      whatsappPhoneNumber: initial?.whatsapp_phone_number || "",
+    };
+  }
+
   function constructConfigPayload(providerAuthsOverride?: Record<string, ProviderAuthConfig>) {
     const mappedSandboxMode = sandboxMode === "full" ? "all" : (sandboxMode === "partial" ? "non-main" : "off");
     const defaultIdentity = `# IDENTITY.md - Who Am I?
@@ -1094,14 +1127,32 @@ Managed by Clawnetes.`,
       privateKeyPath: remotePrivateKeyPath || null
     } : null;
 
-    // Check pairing status live before applying config to ensure we don't overwrite it
+    // Check the active messaging channel state live before applying config so we
+    // don't force a redundant re-pair during reconfiguration.
     let actualIsPaired = isPaired;
+    let actualWhatsappPaired = whatsappPaired;
+    const currentMessagingSettings = getCurrentMessagingSettings();
+    const initialMessagingSettings = initialConfigRef.current
+      ? getInitialMessagingSettings(initialConfigRef.current)
+      : null;
+    const messagingSettingsChanged = initialMessagingSettings
+      ? hasMessagingSettingsChanged(initialMessagingSettings, currentMessagingSettings)
+      : true;
     if (checks.openclaw || isUpdate) {
       try {
-        const status: boolean = await invoke("check_pairing_status", { remote: remoteConfig });
-        if (status) {
-          actualIsPaired = true;
-          setIsPaired(true);
+        if (messagingChannel !== "none") {
+          const status: boolean = await invoke("check_messaging_link_status", {
+            channel: messagingChannel,
+            remote: remoteConfig
+          });
+          if (messagingChannel === "telegram") {
+            actualIsPaired = status;
+            setIsPaired(status);
+          } else if (messagingChannel === "whatsapp") {
+            actualWhatsappPaired = status;
+            setWhatsappPaired(status);
+            if (status) setWhatsappPhoneSubmitted(true);
+          }
         }
       } catch (e) {
         console.warn("Pre-install pairing check failed:", e);
@@ -1110,8 +1161,13 @@ Managed by Clawnetes.`,
 
     const configPayload = constructConfigPayload();
     const agentSessionIds = getAgentSessionInitIds(configPayload.agents);
-    // Ensure we preserve state if we found it was paired
-    configPayload.preserve_state = actualIsPaired;
+    const effectiveMessagingLinked = isMessagingLinked(messagingChannel, {
+      telegramPaired: actualIsPaired,
+      whatsappPaired: actualWhatsappPaired,
+    });
+    configPayload.preserve_state = initialMessagingSettings && !messagingSettingsChanged
+      ? true
+      : effectiveMessagingLinked;
 
     if (initialConfigRef.current) {
       const initialPayload = transformInitialToPayload(initialConfigRef.current);
@@ -1190,7 +1246,7 @@ Managed by Clawnetes.`,
         }
 
         setProgress("Finalizing setup...");
-        if (!actualIsPaired) {
+        if (shouldShowTelegramPairing(messagingChannel, actualIsPaired)) {
           const instruction: string = await invoke("generate_pairing_code");
           setPairingCode(instruction);
         }
@@ -1254,7 +1310,7 @@ Managed by Clawnetes.`,
         }
 
         setProgress("Finalizing setup...");
-        if (!actualIsPaired) {
+        if (shouldShowTelegramPairing(messagingChannel, actualIsPaired)) {
           const instruction: string = await invoke("generate_pairing_code");
           setPairingCode(instruction);
         }
@@ -1425,11 +1481,15 @@ Managed by Clawnetes.`,
       if (config.cron_jobs) setCronJobs(config.cron_jobs);
 
       // Load new fields
-      if (config.whatsapp_enabled) {
-        setMessagingChannel("whatsapp");
-        setWhatsappPaired(true);       // already connected; skip QR re-pairing
+      const loadedMessagingChannel = getMessagingChannelFromConfig(config);
+      setMessagingChannel(loadedMessagingChannel);
+      if (loadedMessagingChannel === "whatsapp") {
+        setWhatsappPaired(true);
         setWhatsappPhoneSubmitted(true);
-      } else if (config.telegram_token) setMessagingChannel("telegram");
+      } else if (loadedMessagingChannel === "none") {
+        setWhatsappPaired(false);
+        setWhatsappPhoneSubmitted(false);
+      }
       if (config.whatsapp_phone_number) setWhatsappPhoneNumber(config.whatsapp_phone_number);
       if (config.whatsapp_dm_policy) setWhatsappDmPolicy(config.whatsapp_dm_policy);
       if (config.thinking_level) setThinkingLevel(config.thinking_level);
@@ -1470,6 +1530,29 @@ Managed by Clawnetes.`,
 
       if (config.is_paired !== undefined) {
         setIsPaired(config.is_paired);
+      }
+
+      try {
+        if (loadedMessagingChannel !== "none") {
+          const remoteConfig = targetEnvironment === "cloud" ? {
+            ip: remoteIp,
+            user: remoteUser,
+            password: remotePassword || null,
+            privateKeyPath: remotePrivateKeyPath || null
+          } : null;
+          const linked: boolean = await invoke("check_messaging_link_status", {
+            channel: loadedMessagingChannel,
+            remote: remoteConfig
+          });
+          if (loadedMessagingChannel === "telegram") {
+            setIsPaired(linked);
+          } else if (loadedMessagingChannel === "whatsapp") {
+            setWhatsappPaired(linked);
+            setWhatsappPhoneSubmitted(linked || Boolean(config.whatsapp_phone_number));
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to refresh messaging link state:", e);
       }
 
       setMaintenanceStatus("✅ Configuration loaded.");
@@ -4257,7 +4340,7 @@ Managed by Clawnetes.`,
             )}
 
             <div className="pairing-result">
-              {!isPaired && (
+              {shouldShowTelegramPairing(messagingChannel, isPaired) && (
                 <>
                   <h3>Telegram Pairing</h3>
                   <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "0.5rem" }}>
@@ -4288,7 +4371,7 @@ Managed by Clawnetes.`,
               )}
 
               {/* WhatsApp QR Pairing */}
-              {messagingChannel === "whatsapp" && !whatsappPaired && (
+              {shouldShowWhatsAppPairing(messagingChannel, whatsappPaired) && (
                 <div style={{ marginTop: "2rem", padding: "1.5rem", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "12px" }}>
                   <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>WhatsApp Pairing</h3>
                   <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
