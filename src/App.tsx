@@ -840,16 +840,16 @@ function App() {
     return normalizeToolPolicy(
       config.tools_profile
         ? {
-            profile: config.tools_profile,
-            allow: config.allowed_tools,
-            deny: config.denied_tools,
-          }
+          profile: config.tools_profile,
+          allow: config.allowed_tools,
+          deny: config.denied_tools,
+        }
         : deriveToolPolicyFromLegacy(
-            config.tools_mode,
-            config.allowed_tools,
-            config.denied_tools,
-            availableSkillIds,
-          ),
+          config.tools_mode,
+          config.allowed_tools,
+          config.denied_tools,
+          availableSkillIds,
+        ),
       availableSkillIds,
     );
   }
@@ -2137,21 +2137,21 @@ Managed by Clawnetes.`,
               const skill = availableSkills.find(sk => sk.id === s);
               return skill?.authMode === "oauth";
             }).length > 0 && (
-              <div className="form-group" style={{ marginTop: "1rem" }}>
-                <label>Skill OAuth (Deferred)</label>
-                {selectedSkills.filter(s => {
-                  const skill = availableSkills.find(sk => sk.id === s);
-                  return skill?.authMode === "oauth";
-                }).map(s => {
-                  const skill = availableSkills.find(sk => sk.id === s)!;
-                  return (
-                    <div key={s} style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                      {skill.name}: an OpenClaw terminal auth step will run at the end of setup.
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                <div className="form-group" style={{ marginTop: "1rem" }}>
+                  <label>Skill OAuth (Deferred)</label>
+                  {selectedSkills.filter(s => {
+                    const skill = availableSkills.find(sk => sk.id === s);
+                    return skill?.authMode === "oauth";
+                  }).map(s => {
+                    const skill = availableSkills.find(sk => sk.id === s)!;
+                    return (
+                      <div key={s} style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                        {skill.name}: an OpenClaw terminal auth step will run at the end of setup.
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
             <div className="button-group" style={{ marginTop: "1.5rem" }}>
               <button className="primary" disabled={!LOCAL_PROVIDERS.has(provider) && !isOAuthMethod(getProviderAuth(provider).auth_method) && !getProviderAuth(provider).token} onClick={() => setStep(9)}>Next</button>
@@ -4428,7 +4428,7 @@ Managed by Clawnetes.`,
                   <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
                     <a
                       href="#"
-                      onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawnetes"); }}
+                      onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawnetes-license"); }}
                       style={{ color: "var(--text-muted)", fontSize: "0.9rem", textDecoration: "underline", cursor: "pointer" }}
                     >
                       If you find OpenClaw useful, please consider making a small donation to support development.
@@ -4505,7 +4505,7 @@ Managed by Clawnetes.`,
             <div style={{ marginTop: "1rem", fontSize: "0.85rem" }}>
               <a
                 href="#"
-                onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawsetup"); }}
+                onClick={(e) => { e.preventDefault(); open("https://aimodelscompass.gumroad.com/l/clawnetes-license"); }}
                 style={{ color: "var(--primary)" }}
               >
                 Get a license key &rarr;
