@@ -7,7 +7,7 @@ export const OAUTH_METHODS_BY_PROVIDER: Record<string, Array<{ value: string; la
     { value: "openai-codex", label: "OpenAI Codex OAuth", oauthProviderId: "openai-codex" },
   ],
   google: [
-    { value: "google-gemini-cli", label: "Gemini CLI OAuth", oauthProviderId: "google-gemini-cli" },
+    { value: "google-gemini-cli", label: "Google Gemini CLI OAuth", oauthProviderId: "google-gemini-cli" },
   ],
 };
 
@@ -201,7 +201,9 @@ export function getProviderAuthOptions(provider: string): Array<{ value: string;
     options.push({
       value: oauthOption.value,
       label: oauthOption.label,
-      description: "Launch the provider auth flow in your browser and import the resulting profile.",
+      description: provider === "google"
+        ? "Unofficial Google Code Assist integration. Some users have reported Google account restrictions after using third-party Gemini CLI clients; if requests fail, set GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID, or use the Gemini API key path instead."
+        : "Launch the provider auth flow in your browser and import the resulting profile.",
     });
   }
 

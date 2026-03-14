@@ -35,6 +35,14 @@ describe("providerAuth utilities", () => {
     expect(googleOptions).toEqual(["token", "google-gemini-cli"]);
   });
 
+  it("describes google oauth with the same unofficial-code-assist caution as openclaw", () => {
+    const googleOauth = getProviderAuthOptions("google").find((option) => option.value === "google-gemini-cli");
+    expect(googleOauth?.label).toContain("Google Gemini CLI OAuth");
+    expect(googleOauth?.description).toContain("Unofficial Google Code Assist integration");
+    expect(googleOauth?.description).toContain("account restrictions");
+    expect(googleOauth?.description).toContain("GOOGLE_CLOUD_PROJECT");
+  });
+
   it("marks only supported oauth methods as OAuth", () => {
     expect(isOAuthMethod("openai-codex")).toBe(true);
     expect(isOAuthMethod("google-gemini-cli")).toBe(true);
@@ -106,6 +114,43 @@ describe("providerAuth utilities", () => {
 
     expect(queue).toEqual([
       expect.objectContaining({ id: "provider:google", targetProvider: "google", authMethod: "google-gemini-cli" }),
+    ]);
+  });
+
+  it("builds a deferred OAuth queue for Gemini skill auth even when no model references google", () => {
+    const queue = buildDeferredOAuthQueue({
+      referencedProviders: [],
+      providerAuths: {
+        google: {
+          auth_method: "google-gemini-cli",
+          token: "",
+          profile_key: null,
+          profile: null,
+          oauth_provider_id: "google-gemini-cli",
+        },
+      },
+      selectedSkills: ["gemini"],
+      availableSkills: [
+        {
+          id: "gemini",
+          name: "Gemini CLI",
+          desc: "Gemini CLI",
+          requiresAuth: true,
+          authMode: "oauth",
+          oauthBaseProvider: "google",
+          oauthMethod: "google-gemini-cli",
+          oauthProviderId: "google-gemini-cli",
+        },
+      ],
+    });
+
+    expect(queue).toEqual([
+      expect.objectContaining({
+        id: "skill:gemini",
+        targetProvider: "google",
+        authMethod: "google-gemini-cli",
+        oauthProviderId: "google-gemini-cli",
+      }),
     ]);
   });
 
